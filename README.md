@@ -1,10 +1,60 @@
-# AI-assisted galaxy morphology analysis system
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="AI-assisted galaxy morphology analysis" width="96%">
+</p>
 
-**Local-first, reproducible PyTorch tooling** for **scalable astronomical workflows**: morphology classification, **optional multi-task** science heads (merger / bar / asymmetry proxies), **rotation-aware training**, **test-time augmentation**, **active-learning exports**, **robustness evaluation**, **dataset characterization**, and **explainability** (Grad-CAM, calibration, MC dropout) — all runnable **without cloud services or paid APIs**.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+"></a>
+  <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: Black">
+  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a>
+  <img src="https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white" alt="pytest">
+</p>
+
+<p align="center">
+  <sub><a href="CONTRIBUTING.md"><strong>Contributing</strong></a> · <a href="CODE_OF_CONDUCT.md"><strong>Code of Conduct</strong></a> · <a href="docs/RESEARCH_REPORT.md"><strong>Research report</strong></a></sub>
+</p>
+
+**Local-first PyTorch** for morphology and optional **science heads** (merger / bar / asymmetry), **rotation-aware training**, **TTA**, **active learning exports**, **robustness checks**, **Grad-CAM / calibration / MC dropout**, and a **Streamlit** demo — no cloud or paid APIs required.
+
+| | |
+|:--|:--|
+| **Trust** | Checkpoints, deterministic splits, optional experiment folders |
+| **Science** | `galaxy-scientific-eval`, `galaxy-trust-report`, `galaxy-dataset-study` |
+| **UX** | `galaxy-infer`, Streamlit app, ONNX export |
+| **Scale** | Batched inference, JSONL active-learning queue, CSV review export |
 
 For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 
-## Architecture overview
+## System architecture
+
+```mermaid
+flowchart LR
+  subgraph Data
+    D[Image folders + optional multitask CSV]
+    Q[Dataset quality JSON]
+  end
+  subgraph Train
+    Y[YAML config]
+    M[Models: CNN + torchvision registry]
+    L[Training / MT loops]
+  end
+  subgraph Analyze
+    E[Metrics + ROC/PR]
+    S[Scientific robustness]
+    T[Trust report + Grad-CAM]
+    A[Active learning queue]
+  end
+  D --> L
+  Y --> L
+  M --> L
+  L --> E
+  L --> T
+  D --> Q
+  E --> S
+  L --> A
+```
+
+### Module map
 
 | Layer | Role |
 |--------|------|
@@ -23,6 +73,29 @@ For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 | **app/** | **Streamlit** local demo (`streamlit_app.py`, `components/`, `assets/`). |
 
 Training flow: **YAML** → **loaders** (optional **rotation augmentation**, optional **multi-task** labels) → **forward + loss** → **validation + extended metrics** → **checkpoints** (`model_name`, `multitask` flag when applicable) → **ROC/PR / trust / robustness artifacts**.
+
+## Benchmark snapshot
+
+Run `galaxy-benchmark` (or `python scripts/benchmark_models.py`) to regenerate **`outputs/benchmarks/benchmark_table.md`**. Example smoke output (1 epoch, tiny split — **not** competitive scores):
+
+| model | num_parameters | val_accuracy | macro_f1 | inference_images_per_sec | train_epochs_ran |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| lightweight | ~4.2×10⁵ | *(your run)* | *(your run)* | *(device-dependent)* | 1 |
+
+<details>
+<summary>Example row from CI smoke data</summary>
+
+| model | num_parameters | val_accuracy | val_loss | macro_f1 | inference_images_per_sec | peak_gpu_memory_mb | train_epochs_ran |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| lightweight | 422659 | 0.3333 | 1.0990 | 0.1667 | 48.55 | — | 1 |
+
+</details>
+
+## Explainability gallery
+
+| Grad-CAM compare (placeholder) | After you run `--explain` or `galaxy-trust-report` |
+|:--:|:--:|
+| ![Grad-CAM placeholder](docs/figures/gradcam-readme-placeholder.svg) | Commit PNGs from `outputs/visualizations/gradcam/*_gradcam_compare.png` here or under `docs/figures/` |
 
 ## Setup
 
@@ -84,6 +157,7 @@ Models are built with **`galaxy_morphology.models.registry.build_model`** (same 
 | `model.name` | Notes |
 |--------------|--------|
 | `lightweight` | Small custom CNN. |
+| `lightweight_multitask` | Same trunk + merger / bar / asymmetry heads (optional manifest labels). |
 | `efficient` | MobileNet-style custom CNN. |
 | `efficientnet_b0` | torchvision EfficientNet-B0 + new head (`EfficientNet_B0_Weights`). |
 | `convnext_tiny` | torchvision ConvNeXt Tiny (`ConvNeXt_Tiny_Weights`). |
@@ -258,8 +332,12 @@ Some GPU kernels remain non-deterministic even with these flags; for strict bitw
 ## Project structure
 
 ```text
+.github/                # CI workflow, issue & PR templates
 configs/                 # YAML configs
 app/                     # Streamlit demo (streamlit_app.py, components/, assets/)
+CONTRIBUTING.md          # Contributor guide
+CODE_OF_CONDUCT.md       # Community standards
+docs/                    # Research report, figures, banner assets
 src/galaxy_morphology/   # Installable Python package
   data/ models/ training/ inference/ evaluation/ explainability/ visualization/ utils/
 scripts/                 # Runnable wrappers without prior pip install
@@ -276,6 +354,10 @@ LICENSE                  # MIT
 ```
 
 ## Development
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for branch/PR expectations. CI runs **Ruff**, **Black**, and **pytest** on Python 3.10 and 3.11 (`.github/workflows/ci.yml`). After publishing the repo, add a workflow badge by replacing `OWNER` / `REPO` in:
+
+`https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg`
 
 ```bash
 pip install -r requirements/dev.txt

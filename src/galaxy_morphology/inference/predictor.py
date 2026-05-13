@@ -87,7 +87,7 @@ def predict(
 ) -> tuple[str, float, dict[str, float]]:
     """Return predicted label, confidence, and per-class probabilities."""
     image_tensor = image_tensor.to(device)
-    with torch.no_grad():
+    with torch.inference_mode():
         outputs = model(image_tensor)
         logits = morph_logits(outputs)
         probabilities = F.softmax(logits, dim=1)
@@ -133,9 +133,7 @@ def predict_paths_batched(
     for p in image_paths:
         try:
             with Image.open(p) as im:
-                im.verify()
-            with Image.open(p) as im2:
-                im2.load()
+                im.load()
             valid.append(p)
         except Exception as exc:  # noqa: BLE001
             results.append({"image_path": p, "error": str(exc)})
@@ -144,9 +142,18 @@ def predict_paths_batched(
         return results
 
     ds = _ImagePathDataset(valid, image_size)
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    pin_memory = device.type == "cuda"
+    persistent_workers = num_workers > 0
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+    )
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch_x, batch_paths in loader:
             batch_x = batch_x.to(device, non_blocking=True)
             logits = morph_logits(model(batch_x))
@@ -182,13 +189,22 @@ def benchmark_inference(
     if not valid:
         return {"images_per_sec": 0.0, "num_images": 0.0}
     ds = _ImagePathDataset(valid, image_size)
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    pin_memory = device.type == "cuda"
+    persistent_workers = num_workers > 0
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+    )
     model.eval()
     n = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         for _ in range(warmup_batches):
             for batch_x, _ in loader:
-                batch_x = batch_x.to(device)
+                batch_x = batch_x.to(device, non_blocking=True)
                 _ = model(batch_x)
                 break
         if device.type == "cuda":

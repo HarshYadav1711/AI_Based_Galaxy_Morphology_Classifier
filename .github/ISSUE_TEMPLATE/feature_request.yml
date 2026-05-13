@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an idea for this project
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep suggestions aligned with **local-first** workflows (no paid APIs / no required cloud).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What limitation or pain point would this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: High-level design or user-facing behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional.
