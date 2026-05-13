@@ -22,6 +22,7 @@ dependencies = [
   "tqdm>=4.65.0",
   "pandas>=2.0.0",
   "pyyaml>=6.0.0",
+  "grad-cam>=1.5.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +38,7 @@ galaxy-train = "galaxy_morphology.training.cli:main"
 galaxy-infer = "galaxy_morphology.inference.cli:main"
 galaxy-sample-data = "galaxy_morphology.data.sample_download:main"
 galaxy-benchmark = "galaxy_morphology.evaluation.benchmark_cli:main"
+galaxy-trust-report = "galaxy_morphology.explainability.trust_report_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

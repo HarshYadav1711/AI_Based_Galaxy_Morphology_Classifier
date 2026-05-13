@@ -10,6 +10,10 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+from galaxy_morphology.explainability.pipeline import (
+    run_explainability_for_image,
+    top_k_class_probs,
+)
 from galaxy_morphology.inference.onnx_export import export_onnx
 from galaxy_morphology.inference.predictor import (
     benchmark_inference,
@@ -79,6 +83,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="If set, export the loaded model to this ONNX path and exit batch path early.",
     )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Single-image mode only: run Grad-CAM, top-3, and MC-dropout uncertainty.",
+    )
+    parser.add_argument(
+        "--explain-out",
+        type=str,
+        default="outputs/visualizations/inference",
+        help="Directory for explanation images when --explain is set.",
+    )
+    parser.add_argument(
+        "--mc-dropout-samples",
+        type=int,
+        default=20,
+        help="Stochastic forward passes for MC-dropout when --explain is set.",
+    )
     return parser
 
 
@@ -122,12 +143,12 @@ def main(argv: list[str] | None = None) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Using device: %s", device)
 
-    model, class_names = load_model(
+    model, class_names, resolved_model_name = load_model(
         ckpt,
         device,
         model_name=str(model_name_cfg) if model_name_cfg else None,
     )
-    logger.info("Loaded classes: %s", class_names)
+    logger.info("Loaded classes: %s (architecture: %s)", class_names, resolved_model_name)
 
     if args.onnx_export:
         export_onnx(model, args.onnx_export, input_size=image_size)
@@ -144,10 +165,55 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(f"Image not found: {p}")
         logger.info("Predicting: %s", p)
         tensor, _ = preprocess_image(str(p), image_size)
-        label, conf, probs = predict(model, tensor, device, class_names)
-        logger.info("Prediction: %s (confidence=%.4f)", label, conf)
-        for name, pr in sorted(probs.items(), key=lambda x: x[1], reverse=True):
-            logger.info("  %s: %.4f", name, pr)
+        if args.explain:
+            explain_dir = Path(args.explain_out)
+            ex = run_explainability_for_image(
+                model,
+                tensor,
+                device,
+                class_names,
+                resolved_model_name,
+                stem=p.stem,
+                out_dir=explain_dir,
+                mc_dropout_samples=args.mc_dropout_samples,
+            )
+            mc = ex["mc_dropout"]
+            top3 = ex["top3"]
+            sep = "=" * 62
+            print(sep)
+            print(" Galaxy morphology inference (with explainability)")
+            print(sep)
+            print(f"  Image            : {p.resolve()}")
+            print(f"  Architecture     : {resolved_model_name}")
+            print(f"  Predicted class  : {ex['predicted_class']}")
+            print(f"  Confidence       : {ex['confidence']:.4f}")
+            print("  Top-3 classes    :")
+            for row in top3:
+                print(f"    - {row['class']}: {row['probability']:.4f}")
+            print("  MC dropout       :")
+            print(f"    - mean_confidence      : {mc['mean_confidence']:.4f}")
+            print(f"    - uncertainty_score    : {mc['uncertainty_score']:.4f}")
+            print(f"    - needs_human_review   : {mc['needs_human_review']}")
+            print("  Grad-CAM outputs :")
+            print(f"    - {ex['gradcam']['overlay_path']}")
+            print(f"    - {ex['gradcam']['compare_path']}")
+            print(sep)
+        else:
+            label, conf, probs = predict(model, tensor, device, class_names)
+            top3 = top_k_class_probs(probs, 3)
+            sep = "=" * 62
+            print(sep)
+            print(" Galaxy morphology inference")
+            print(sep)
+            print(f"  Image            : {p.resolve()}")
+            print(f"  Architecture     : {resolved_model_name}")
+            print(f"  Predicted class  : {label}")
+            print(f"  Confidence       : {conf:.4f}")
+            print("  Top-3 classes    :")
+            for name, pr in top3:
+                print(f"    - {name}: {pr:.4f}")
+            print(sep)
+            logger.info("Prediction: %s (confidence=%.4f)", label, conf)
     elif image_dir:
         d = Path(str(image_dir))
         if not d.is_dir():
@@ -189,6 +255,15 @@ def main(argv: list[str] | None = None) -> None:
                     rows.append(row)
             pd.DataFrame(rows).to_csv(output_csv, index=False)
             logger.info("Wrote CSV: %s", output_csv)
+        ok = [r for r in results if "error" not in r]
+        if ok:
+            mean_conf = sum(r["confidence"] for r in ok) / len(ok)
+            logger.info(
+                "Batch summary: %d images OK (mean confidence %.4f). Architecture: %s.",
+                len(ok),
+                mean_conf,
+                resolved_model_name,
+            )
         if args.benchmark:
             ok_paths = [r["image_path"] for r in results if "error" not in r]
             stats = benchmark_inference(

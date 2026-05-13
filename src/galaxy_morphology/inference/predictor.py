@@ -45,18 +45,21 @@ def load_model(
     checkpoint_path: str,
     device: torch.device,
     model_name: str | None = None,
-) -> tuple[torch.nn.Module, list[str]]:
-    """Load weights and class names from a training checkpoint."""
+) -> tuple[torch.nn.Module, list[str], str]:
+    """Load weights and class names from a training checkpoint.
+
+    Returns ``(model, class_names, resolved_model_name)``.
+    """
     ckpt = load_checkpoint(checkpoint_path, map_location=device)
     class_names = list(ckpt.get("class_names", ["spiral", "elliptical", "irregular"]))
     num_classes = len(class_names)
-    resolved_name = model_name or ckpt.get("model_name", "lightweight")
+    resolved_name = str(model_name or ckpt.get("model_name", "lightweight"))
     # Weights are loaded from checkpoint; avoid re-downloading ImageNet backbones.
-    model = build_model(str(resolved_name), num_classes, pretrained=False)
+    model = build_model(resolved_name, num_classes, pretrained=False)
     model.load_state_dict(ckpt["model_state_dict"])
     model = model.to(device)
     model.eval()
-    return model, class_names
+    return model, class_names, resolved_name
 
 
 def preprocess_image(image_path: str, image_size: int = 224) -> tuple[torch.Tensor, Image.Image]:

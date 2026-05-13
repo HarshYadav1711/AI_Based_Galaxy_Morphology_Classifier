@@ -52,7 +52,7 @@ def benchmark_model(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     set_seed(seed, deterministic_cudnn=False)
-    train_loader, val_loader, class_names, _train_labels = load_dataset(
+    train_loader, val_loader, class_names, _train_labels, _train_paths, _val_paths = load_dataset(
         data_dir=data_dir,
         image_size=image_size,
         batch_size=batch_size,

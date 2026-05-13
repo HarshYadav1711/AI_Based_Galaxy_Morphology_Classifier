@@ -14,6 +14,7 @@ For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 | **src/galaxy_morphology/training/** | AMP, grad clip, early stopping, **mixup**, **weighted CE**, **label smoothing**, **cosine or plateau** LR, local **experiment** dirs (JSONL + CSV). |
 | **src/galaxy_morphology/inference/** | Checkpoint load, batched inference, optional **ONNX** export, **throughput** benchmark. |
 | **src/galaxy_morphology/evaluation/** | Metrics, **macro/weighted F1**, balanced accuracy, ROC-AUC (OvR), **benchmark** → CSV + Markdown table. |
+| **src/galaxy_morphology/explainability/** | **Grad-CAM** (`grad-cam`), **MC dropout** uncertainty, **ECE** + reliability plots, failure montages, **trust report** CLI. |
 | **src/galaxy_morphology/visualization/** | Training curves, confusion matrix, **ROC**, **PR**, **class distribution**. |
 | **src/galaxy_morphology/utils/** | YAML merge, structured logging, seeds, checkpoint I/O. |
 | **tests/** | pytest smoke tests for model, data, inference, registry, and config loading. |
@@ -47,6 +48,7 @@ Console entry points (after `pip install -e .`):
 - `galaxy-infer` — inference CLI  
 - `galaxy-sample-data` — dummy or SDSS sample images  
 - `galaxy-benchmark` — compare models (CSV + Markdown table)  
+- `galaxy-trust-report` — validation trust report (calibration, Grad-CAM, failures, markdown)  
 
 Without installation, use `python scripts/train.py` (scripts prepend `src/` to `sys.path`).
 
@@ -152,7 +154,27 @@ Directory mode uses a **DataLoader** for batched GPU inference. **`--benchmark`*
 
 The checkpoint’s `class_names` (and optional `model_name`) define outputs.
 
-## Metrics and artifacts
+### Explainable inference (single image)
+
+Uses the maintained **[grad-cam](https://github.com/jacobgil/pytorch-grad-cam)** package (`pytorch_grad_cam`) for overlays and side-by-side figures—no custom Grad-CAM forks.
+
+```bash
+galaxy-infer --checkpoint checkpoints/best_model.pth --image path/to/galaxy.jpg --explain --explain-out outputs/visualizations/inference
+```
+
+Writes overlay + comparison PNGs under `--explain-out`, prints **top-3** probabilities, **Monte Carlo dropout** summary (mean confidence, normalized entropy uncertainty, `needs_human_review` flag), and Grad-CAM paths.
+
+## Trustworthy AI (validation report)
+
+Automated **markdown report** plus figures under **`outputs/visualizations/`** (calibration, confusion matrix, failure montages, example Grad-CAMs):
+
+```bash
+galaxy-trust-report --checkpoint checkpoints/best_model.pth --data-dir data/galaxies --out-dir outputs/visualizations
+```
+
+This computes **validation accuracy / macro F1**, **expected calibration error (ECE)** on top-class confidence, a **reliability diagram**, a **confusion matrix** image, three **failure-analysis** montages (most confident wrong, least confident correct, lowest-confidence samples), **MC-dropout aggregate stats** on the first `--mc-subset` validation images (default 48), and **Grad-CAM** panels for the first `--gradcam-examples` images (default 4). Open **`outputs/visualizations/evaluation_report.md`** in any Markdown viewer; figures are linked with relative paths.
+
+**Grad-CAM / explanation screenshots for documentation:** run the commands above on your checkpoint, then add the generated PNGs (for example `outputs/visualizations/gradcam/*_gradcam_compare.png`) to your paper, slides, or commit copies under `docs/figures/` if you want them to render in Git-hosted README previews.
 
 After training you typically get:
 
@@ -166,6 +188,8 @@ After training you typically get:
 | Run-level metrics | `outputs/metrics.json` (includes **extended** block: macro/weighted F1, balanced acc, ROC-AUC OvR) |
 | Extended metrics JSON | `outputs/extended_metrics.json` |
 | Per-class sklearn report | `outputs/classification_report.json` |
+| Trust / explainability report | `outputs/visualizations/evaluation_report.md` (after `galaxy-trust-report`) |
+| Grad-CAM & calibration figures | `outputs/visualizations/gradcam/`, `calibration/`, `failure/`, `confusion/` |
 | ROC/PR raw points | `outputs/roc_curve_data.json`, `outputs/pr_curve_data.json` |
 | Per-epoch CSV | `outputs/training_history.csv` |
 | Dataset quality | `outputs/dataset_statistics.json` |
@@ -183,7 +207,7 @@ Some GPU kernels remain non-deterministic even with these flags; for strict bitw
 ```text
 configs/                 # YAML configs
 src/galaxy_morphology/   # Installable Python package
-  data/ models/ training/ inference/ evaluation/ visualization/ utils/
+  data/ models/ training/ inference/ evaluation/ explainability/ visualization/ utils/
 scripts/                 # Runnable wrappers without prior pip install
 tests/                   # pytest
 notebooks/               # Optional experiments (.gitkeep)

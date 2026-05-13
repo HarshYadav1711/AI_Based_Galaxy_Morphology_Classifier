@@ -152,7 +152,7 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
         qreport = analyze_dataset(data_dir)
         save_dataset_statistics(outputs_dir / "dataset_statistics.json", qreport)
 
-    train_loader, val_loader, class_names, train_labels = load_dataset(
+    train_loader, val_loader, class_names, train_labels, _train_paths, _val_paths = load_dataset(
         data_dir=data_dir,
         train_split=train_split,
         image_size=image_size,

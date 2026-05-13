@@ -23,7 +23,7 @@ def test_load_and_predict(tmp_path: Path) -> None:
         ck,
     )
     device = torch.device("cpu")
-    m2, classes = load_model(str(ck), device, model_name="lightweight")
+    m2, classes, _name = load_model(str(ck), device, model_name="lightweight")
     img = tmp_path / "x.png"
     Image.new("RGB", (64, 64), color=(1, 2, 3)).save(img)
     tensor, _ = preprocess_image(str(img), image_size=32)

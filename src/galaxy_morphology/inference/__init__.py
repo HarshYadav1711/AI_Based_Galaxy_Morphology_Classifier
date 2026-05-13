@@ -1,6 +1,5 @@
-"""Inference package."""
+"""Inference package (checkpoint load, preprocess, predict, ONNX)."""
 
-from galaxy_morphology.inference.cli import build_parser, main
 from galaxy_morphology.inference.onnx_export import export_onnx
 from galaxy_morphology.inference.predictor import (
     benchmark_inference,
@@ -13,10 +12,8 @@ from galaxy_morphology.inference.predictor import (
 
 __all__ = [
     "benchmark_inference",
-    "build_parser",
     "export_onnx",
     "load_model",
-    "main",
     "predict",
     "predict_batch",
     "predict_paths_batched",

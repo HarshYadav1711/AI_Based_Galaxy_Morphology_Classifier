@@ -20,7 +20,7 @@ def _write_dummy_images(root: Path) -> None:
 
 def test_load_dataset(tmp_path: Path) -> None:
     _write_dummy_images(tmp_path)
-    train_loader, val_loader, names, train_labels = load_dataset(
+    train_loader, val_loader, names, train_labels, _tp, _vp = load_dataset(
         data_dir=str(tmp_path),
         train_split=0.67,
         image_size=32,
