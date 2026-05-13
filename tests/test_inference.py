@@ -18,6 +18,7 @@ def test_load_and_predict(tmp_path: Path) -> None:
         {
             "model_state_dict": model.state_dict(),
             "class_names": ["spiral", "elliptical", "irregular"],
+            "model_name": "lightweight",
         },
         ck,
     )

@@ -1,8 +1,8 @@
 checkpoint: checkpoints/best_model.pth
-model: lightweight
+model: null
 image_size: 224
+inference_batch_size: 32
 
-# Set one of image / image_dir for a run, or pass CLI flags.
 image: null
 image_dir: null
 output_csv: null

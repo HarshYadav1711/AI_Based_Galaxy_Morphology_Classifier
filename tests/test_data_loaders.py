@@ -20,7 +20,7 @@ def _write_dummy_images(root: Path) -> None:
 
 def test_load_dataset(tmp_path: Path) -> None:
     _write_dummy_images(tmp_path)
-    train_loader, val_loader, names = load_dataset(
+    train_loader, val_loader, names, train_labels = load_dataset(
         data_dir=str(tmp_path),
         train_split=0.67,
         image_size=32,
@@ -29,6 +29,7 @@ def test_load_dataset(tmp_path: Path) -> None:
         seed=0,
     )
     assert names == ["spiral", "elliptical", "irregular"]
+    assert len(train_labels) == len(train_loader.dataset)
     assert len(train_loader) >= 1 and len(val_loader) >= 1
     batch = next(iter(train_loader))
     assert batch[0].shape[0] <= 2

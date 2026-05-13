@@ -94,26 +94,17 @@ class EfficientGalaxyNet(nn.Module):
 
 
 def get_model(
-    model_name: str = "lightweight", num_classes: int = 3, pretrained: bool = False
+    model_name: str = "lightweight",
+    num_classes: int = 3,
+    pretrained: bool = True,
 ) -> nn.Module:
-    """Instantiate a model by name.
+    """Backward-compatible factory; delegates to :func:`registry.build_model`."""
+    from galaxy_morphology.models.registry import build_model
 
-    Args:
-        model_name: ``lightweight`` or ``efficient``.
-        num_classes: Number of output logits.
-        pretrained: Reserved for future use (custom models are not pretrained here).
-
-    Returns:
-        A trainable ``nn.Module``.
-    """
-    _ = pretrained  # API compatibility; no pretrained weights for custom heads.
-    if model_name == "lightweight":
-        return LightweightGalaxyCNN(num_classes=num_classes)
-    if model_name == "efficient":
-        return EfficientGalaxyNet(num_classes=num_classes)
-    raise ValueError(f"Unknown model name: {model_name}")
+    return build_model(model_name, num_classes, pretrained=pretrained)
 
 
 def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters."""
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    from galaxy_morphology.models.registry import count_parameters as _count
+
+    return _count(model)

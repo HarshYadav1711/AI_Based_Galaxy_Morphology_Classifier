@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from galaxy_morphology.models.registry import list_model_names
 from galaxy_morphology.training.run import run_training
 from galaxy_morphology.utils.config import deep_update, load_yaml_config
 from galaxy_morphology.utils.logging_utils import setup_logging
@@ -54,8 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default=None,
-        choices=["lightweight", "efficient"],
-        help="Override model.name.",
+        choices=list_model_names(),
+        help="Override model.name (see registry for options).",
     )
     parser.add_argument(
         "--save-dir",
@@ -118,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
 
     log_level = (cfg.get("logging") or {}).get("level", "INFO")
     setup_logging(str(log_level))
-    run_training(cfg)
+    run_training(cfg, config_path=config_path)
 
 
 if __name__ == "__main__":

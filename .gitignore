@@ -64,3 +64,7 @@ Thumbs.db
 # Legacy local plot dumps at repo root (plots now default under checkpoints/)
 training_history.png
 confusion_matrix.png
+
+# Experiment runs (keep folder via .gitkeep)
+experiments/*
+!experiments/.gitkeep

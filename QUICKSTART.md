@@ -1,224 +1,128 @@
 # Quick Start Guide
 
-## Step-by-Step Instructions to Run the Project
+Short path from zero to a trained classifier. For architecture options, benchmarks, and experiment folders, see [README.md](README.md).
 
-### Step 1: Install Dependencies
+## 1. Install
 
-Open a terminal/command prompt in the project directory and run:
-
-```bash
-pip install -r requirements.txt
-```
-
-**Note for Windows users:** If you get permission errors, try:
-```bash
-pip install --user -r requirements.txt
-```
-
-### Step 2: Set Up Test Data (Quick Test)
-
-For a quick test without real galaxy images, create dummy data:
+From the project root:
 
 ```bash
-python download_sample_data.py --mode dummy --num_per_class 5
+pip install -r requirements/base.txt
+pip install -e .
 ```
 
-This creates placeholder images in `data/galaxies/` with the correct folder structure.
+(Optional dev tools: `pip install -r requirements/dev.txt`)
 
-### Step 3: Train the Model
-
-Run the training script:
+## 2. Dummy data (offline)
 
 ```bash
-python train.py --data_dir data/galaxies
+python scripts/download_sample_data.py --mode dummy --num-per-class 5
 ```
 
-**For a quick test with fewer epochs:**
+This creates `data/galaxies/{spiral,elliptical,irregular}/` with placeholder PNGs.
+
+## 3. Train (YAML + CLI overrides)
+
+Default config: `configs/train.yaml`.
+
 ```bash
-python train.py --data_dir data/galaxies --epochs 10 --batch_size 16
+python scripts/train.py --config configs/train.yaml --epochs 10
+# or, after `pip install -e .`:
+galaxy-train --config configs/train.yaml --epochs 10
 ```
 
-**What happens:**
-- The script loads images from `data/galaxies/`
-- Splits them into train/validation sets
-- Trains the model
-- Saves the best model to `checkpoints/best_model.pth`
-- Creates training plots in the `checkpoints/` folder
+Common overrides:
 
-### Step 4: Make Predictions
-
-Once training is complete, test the model:
-
-**Single image:**
 ```bash
-python inference.py --checkpoint checkpoints/best_model.pth --image data/galaxies/spiral/spiral_1.png
+python scripts/train.py --config configs/train.yaml --data-dir data/galaxies --epochs 20 --batch-size 16 --lr 0.0005 --model lightweight
+python scripts/train.py --config configs/train.yaml --model efficientnet_b0 --epochs 5
 ```
 
-**Batch prediction:**
+Resume:
+
 ```bash
-python inference.py --checkpoint checkpoints/best_model.pth --image_dir data/galaxies/spiral/ --output predictions.csv
+python scripts/train.py --config configs/train.yaml --resume checkpoints/checkpoint_epoch_10.pth
 ```
+
+**What you get**
+
+- Weights: `checkpoints/best_model.pth` (unless `experiment.enabled` moves artifacts under `experiments/…/checkpoints/`).
+- Metrics and tables: `outputs/` (or `experiments/…/outputs/`) — e.g. `metrics.json`, `training_history.csv`, `dataset_statistics.json`, ROC/PR JSON, `extended_metrics.json`.
+- Figures: same `outputs/` or `experiments/…/figures/` — training curves, confusion matrix, ROC, PR, class distribution.
+
+Logs use structured logging (timestamped lines) instead of plain `print`.
+
+## 4. Inference
+
+Single image:
+
+```bash
+python scripts/inference.py --checkpoint checkpoints/best_model.pth --image data/galaxies/spiral/spiral_1.png
+galaxy-infer --checkpoint checkpoints/best_model.pth --image path/to/galaxy.jpg
+```
+
+Directory (batched):
+
+```bash
+python scripts/inference.py --checkpoint checkpoints/best_model.pth --image-dir data/galaxies/spiral --batch-size 16 --output predictions.csv
+```
+
+Optional throughput log:
+
+```bash
+python scripts/inference.py --checkpoint checkpoints/best_model.pth --image-dir data/galaxies/spiral --batch-size 16 --benchmark
+```
+
+Optional ONNX export:
+
+```bash
+python scripts/inference.py --checkpoint checkpoints/best_model.pth --onnx-export model.onnx
+```
+
+Use `--model <name>` only if you must override the architecture stored in the checkpoint; normally the checkpoint’s `model_name` is used.
+
+## 5. Quick model comparison (optional)
+
+```bash
+python scripts/benchmark_models.py --data-dir data/galaxies --epochs 1 --no-pretrained --out-dir outputs/benchmarks
+```
+
+Writes `benchmark_results.csv` and `benchmark_table.md`.
 
 ---
 
-## Using Real Galaxy Data
+## Real data
 
-### Option A: Manual Setup
-
-1. Create the folder structure:
-```bash
-mkdir -p data/galaxies/spiral
-mkdir -p data/galaxies/elliptical
-mkdir -p data/galaxies/irregular
-```
-
-2. Download galaxy images from:
-   - [Galaxy Zoo](https://data.galaxyzoo.org/)
-   - [SDSS](https://www.sdss.org/)
-
-3. Place images in the correct folders:
-   - Spiral galaxies → `data/galaxies/spiral/`
-   - Elliptical galaxies → `data/galaxies/elliptical/`
-   - Irregular galaxies → `data/galaxies/irregular/`
-
-4. Run training:
-```bash
-python train.py --data_dir data/galaxies --epochs 50
-```
-
-### Option B: Use SDSS API (Advanced)
-
-The `download_sample_data.py` script includes example code for downloading from SDSS. You'll need to modify it with actual galaxy coordinates and classifications.
-
----
-
-## Common Commands
-
-### Training Commands
-
-**Basic training:**
-```bash
-python train.py --data_dir data/galaxies
-```
-
-**Custom training:**
-```bash
-python train.py --data_dir data/galaxies --epochs 100 --batch_size 32 --lr 0.0001
-```
-
-**Resume training:**
-```bash
-python train.py --data_dir data/galaxies --resume checkpoints/checkpoint_epoch_50.pth
-```
-
-### Inference Commands
-
-**Single image:**
-```bash
-python inference.py --checkpoint checkpoints/best_model.pth --image your_image.jpg
-```
-
-**Batch prediction:**
-```bash
-python inference.py --checkpoint checkpoints/best_model.pth --image_dir test_images/ --output results.csv
-```
+1. Create `data/galaxies/spiral`, `elliptical`, `irregular`.
+2. Add labeled `.jpg` / `.png` images (see [Galaxy Zoo](https://data.galaxyzoo.org/) or [SDSS](https://www.sdss.org/)).
+3. Tune `configs/train.yaml` (epochs, `model.name`, `scheduler.type`, `training.loss`, `training.mixup`, etc.) and run `galaxy-train` or `python scripts/train.py`.
 
 ---
 
 ## Troubleshooting
 
-### "No images found" Error
+**No images found**
 
-**Problem:** The script can't find images in the data directory.
+- Paths must be `data/galaxies/<class_name>/*.png` (or `.jpg`).
+- Run the dummy script in step 2.
 
-**Solution:**
-1. Check that `data/galaxies/` exists
-2. Verify subdirectories: `spiral/`, `elliptical/`, `irregular/`
-3. Ensure images are in common formats: `.jpg`, `.png`, `.jpeg`
-4. Run the dummy data script: `python download_sample_data.py --mode dummy`
+**CUDA out of memory**
 
-### CUDA/GPU Issues
+- Lower `--batch-size` (training) or `data.batch_size` in YAML.
+- Lower `data.image_size` in YAML.
+- Prefer `efficientnet_b0` or `lightweight` over larger backbones.
 
-**Problem:** Out of memory or CUDA errors.
+**Wrong model at inference**
 
-**Solution:**
-- Reduce batch size: `--batch_size 16` or `--batch_size 8`
-- Use smaller images: `--image_size 128`
-- Use CPU (if GPU fails): The script automatically uses CPU if CUDA is unavailable
+- Train and infer with the same `model.name`, or rely on the checkpoint’s saved `model_name` and omit `--model`.
 
-### Import Errors
+**Import errors**
 
-**Problem:** `ModuleNotFoundError` when running scripts.
-
-**Solution:**
-```bash
-pip install -r requirements.txt
-```
-
-If specific packages fail, install individually:
-```bash
-pip install torch torchvision
-pip install numpy pillow matplotlib scikit-learn
-```
+- Run `pip install -e .` from the repo root so `galaxy_morphology` is on the path, or use `python scripts/train.py` (scripts add `src/` automatically).
 
 ---
 
-## Expected Output
+## Next steps
 
-### During Training
-
-You should see:
-```
-Using device: cuda  (or cpu)
-Loading dataset...
-Classes: ['spiral', 'elliptical', 'irregular']
-Train batches: X, Val batches: Y
-Model: lightweight
-Parameters: XXX,XXX
-
-Starting training...
-Epoch 1/50
-Training: 100%|████████| X/X [XX:XX<00:00, loss=0.XXXX]
-Validating: 100%|████████| X/X [XX:XX<00:00]
-Train Loss: X.XXXX, Train Acc: 0.XXXX
-Val Loss: X.XXXX, Val Acc: 0.XXXX
-New best model saved! Val Acc: 0.XXXX
-```
-
-### After Training
-
-Check the `checkpoints/` folder:
-- `best_model.pth` - The trained model
-- `training_history.png` - Training curves
-- `confusion_matrix.png` - Classification results
-
-### During Inference
-
-You should see:
-```
-Using device: cuda
-Loading model from checkpoints/best_model.pth...
-Model loaded. Classes: ['spiral', 'elliptical', 'irregular']
-
-Predicting on: your_image.jpg
-
-Prediction: spiral
-Confidence: 0.9234
-
-Class Probabilities:
-  spiral: 0.9234
-  elliptical: 0.0543
-  irregular: 0.0223
-```
-
----
-
-## Next Steps
-
-1. **Improve accuracy:** Add more training data (100+ images per class recommended)
-2. **Experiment:** Try different models (`--model efficient`) or hyperparameters
-3. **Deploy:** Use the trained model in your citizen science workflow
-4. **Extend:** Modify the code to add more galaxy classes or features
-
-For more details, see `README.md`.
-
+- Read [README.md](README.md) for the model registry, experiment tracking, and metric artifacts.
+- For code examples: `python example_usage.py`

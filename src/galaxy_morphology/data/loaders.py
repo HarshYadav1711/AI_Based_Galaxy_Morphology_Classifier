@@ -40,7 +40,7 @@ def load_dataset(
     batch_size: int = 32,
     num_workers: int = 0,
     seed: int = 42,
-) -> tuple[DataLoader, DataLoader, list[str]]:
+) -> tuple[DataLoader, DataLoader, list[str], list[int]]:
     """Load train/validation loaders from ``data_dir/<class>/*.jpg|png``.
 
     Args:
@@ -52,7 +52,7 @@ def load_dataset(
         seed: Random seed for splits when stratification fails.
 
     Returns:
-        Tuple of ``(train_loader, val_loader, class_names)``.
+        Tuple of ``(train_loader, val_loader, class_names, train_labels)``.
 
     Raises:
         ValueError: If no images are found under ``data_dir``.
@@ -149,4 +149,4 @@ def load_dataset(
         shuffle=False,
         num_workers=num_workers,
     )
-    return train_loader, val_loader, class_names
+    return train_loader, val_loader, class_names, train_labels

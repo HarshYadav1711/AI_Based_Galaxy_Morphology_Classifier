@@ -2,31 +2,47 @@
 
 from __future__ import annotations
 
+import json
 import logging
-import os
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.amp import GradScaler
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 
 from galaxy_morphology.data.loaders import load_dataset
+from galaxy_morphology.data.quality import analyze_dataset, save_dataset_statistics
+from galaxy_morphology.evaluation.classification_metrics import (
+    precision_recall_curve_data,
+    roc_curve_data,
+)
 from galaxy_morphology.evaluation.metrics import (
     save_classification_report_json,
     save_metrics_json,
     write_training_history_csv,
 )
-from galaxy_morphology.models.cnn import count_parameters, get_model
+from galaxy_morphology.models.registry import build_model, count_parameters
 from galaxy_morphology.training.early_stopping import EarlyStopping
+from galaxy_morphology.training.experiment import append_metrics_jsonl, create_experiment_dir
 from galaxy_morphology.training.loops import train_epoch, validate
 from galaxy_morphology.utils.seed import set_seed
 from galaxy_morphology.utils.torch_io import load_checkpoint
-from galaxy_morphology.visualization.plots import plot_confusion_matrix, plot_training_history
+from galaxy_morphology.visualization.plots import (
+    plot_class_distribution,
+    plot_confusion_matrix,
+    plot_pr_curves,
+    plot_roc_curves,
+    plot_training_history,
+)
 
 logger = logging.getLogger(__name__)
+
+SchedulerKind = Literal["plateau", "cosine"]
 
 
 def _device_from_config(cfg: dict[str, Any]) -> torch.device:
@@ -44,11 +60,15 @@ def _build_checkpoint(
     epoch: int,
     model: nn.Module,
     optimizer: optim.Optimizer,
-    scheduler: ReduceLROnPlateau | None,
+    scheduler: ReduceLROnPlateau | CosineAnnealingLR | None,
     best_val_acc: float,
     history: dict[str, list[float]],
     class_names: list[str],
     scaler: GradScaler | None,
+    *,
+    model_name: str,
+    scheduler_kind: SchedulerKind,
+    pretrained: bool,
 ) -> dict[str, Any]:
     ckpt: dict[str, Any] = {
         "epoch": epoch,
@@ -57,6 +77,9 @@ def _build_checkpoint(
         "best_val_acc": best_val_acc,
         "history": history,
         "class_names": class_names,
+        "model_name": model_name,
+        "scheduler_kind": scheduler_kind,
+        "pretrained": pretrained,
     }
     if scheduler is not None:
         ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -65,11 +88,20 @@ def _build_checkpoint(
     return ckpt
 
 
-def run_training(cfg: dict[str, Any]) -> None:
-    """Run full train/validate loop from nested config dict.
+def _class_weights_tensor(
+    train_labels: list[int], num_classes: int, device: torch.device
+) -> torch.Tensor:
+    counts = np.bincount(np.asarray(train_labels, dtype=int), minlength=num_classes).astype(
+        np.float64
+    )
+    counts = np.maximum(counts, 1.0)
+    weights = len(train_labels) / (num_classes * counts)
+    weights = weights / weights.sum() * num_classes
+    return torch.tensor(weights, dtype=torch.float32, device=device)
 
-    Expected keys mirror ``configs/train.yaml`` (see repo default file).
-    """
+
+def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> None:
+    """Run full train/validate loop from nested config dict."""
     seed = int(cfg.get("seed", 42))
     repro = cfg.get("reproducibility", {}) or {}
     set_seed(seed, deterministic_cudnn=bool(repro.get("deterministic_cudnn", True)))
@@ -80,6 +112,9 @@ def run_training(cfg: dict[str, Any]) -> None:
     sched_cfg = cfg.get("scheduler", {}) or {}
     out_cfg = cfg.get("outputs", {}) or {}
     ckpt_cfg = train_cfg.get("checkpoint", {}) or {}
+    loss_cfg = train_cfg.get("loss", {}) or {}
+    mix_cfg = train_cfg.get("mixup", {}) or {}
+    exp_cfg = cfg.get("experiment", {}) or {}
 
     data_dir = str(data_cfg.get("dir", "data/galaxies"))
     train_split = float(data_cfg.get("train_split", 0.8))
@@ -90,7 +125,34 @@ def run_training(cfg: dict[str, Any]) -> None:
     device = _device_from_config(cfg)
     logger.info("Using device: %s", device)
 
-    train_loader, val_loader, class_names = load_dataset(
+    outputs_dir = Path(str(out_cfg.get("dir", "outputs")))
+    save_dir = Path(str(ckpt_cfg.get("save_dir", "checkpoints")))
+    exp_dir: Path | None = None
+    if exp_cfg.get("enabled"):
+        slug = str(exp_cfg.get("slug", model_cfg.get("name", "run")))
+        exp_root = Path(str(exp_cfg.get("root", "experiments")))
+        exp_dir = create_experiment_dir(
+            exp_root,
+            slug=slug,
+            config_path=config_path,
+            resolved_config=cfg,
+        )
+        outputs_dir = exp_dir / "outputs"
+        save_dir = exp_dir / "checkpoints"
+        figures_dir = exp_dir / "figures"
+    else:
+        figures_dir = outputs_dir
+
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    quality_cfg = data_cfg.get("quality", {}) or {}
+    if quality_cfg.get("enabled", True):
+        qreport = analyze_dataset(data_dir)
+        save_dataset_statistics(outputs_dir / "dataset_statistics.json", qreport)
+
+    train_loader, val_loader, class_names, train_labels = load_dataset(
         data_dir=data_dir,
         train_split=train_split,
         image_size=image_size,
@@ -98,36 +160,58 @@ def run_training(cfg: dict[str, Any]) -> None:
         num_workers=num_workers,
         seed=seed,
     )
-    logger.info("Classes: %s", class_names)
-    logger.info("Train batches: %d, Val batches: %d", len(train_loader), len(val_loader))
+    label_counts = Counter(train_labels)
+    train_class_counts = {
+        class_names[i]: int(label_counts.get(i, 0)) for i in range(len(class_names))
+    }
+    plot_class_distribution(train_class_counts, figures_dir / "class_distribution_train.png")
 
     model_name = str(model_cfg.get("name", "lightweight"))
-    model = get_model(model_name=model_name, num_classes=len(class_names))
+    pretrained = bool(model_cfg.get("pretrained", True))
+    model = build_model(model_name, len(class_names), pretrained=pretrained)
     logger.info("Model: %s | parameters: %s", model_name, f"{count_parameters(model):,}")
     model = model.to(device)
 
-    criterion = nn.CrossEntropyLoss()
-    lr = float(train_cfg.get("lr", 1e-3))
-    weight_decay = float(train_cfg.get("weight_decay", 1e-4))
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode=str(sched_cfg.get("mode", "min")),
-        factor=float(sched_cfg.get("factor", 0.5)),
-        patience=int(sched_cfg.get("patience", 5)),
+    label_smoothing = float(loss_cfg.get("label_smoothing", 0.0))
+    use_weighted = bool(loss_cfg.get("weighted", False))
+    weight_tensor = None
+    if use_weighted:
+        weight_tensor = _class_weights_tensor(train_labels, len(class_names), device)
+    criterion = nn.CrossEntropyLoss(
+        weight=weight_tensor,
+        label_smoothing=label_smoothing,
     )
 
+    lr = float(train_cfg.get("lr", 1e-3))
+    weight_decay = float(train_cfg.get("weight_decay", 1e-4))
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
     epochs = int(train_cfg.get("epochs", 50))
+    scheduler_kind: SchedulerKind = str(sched_cfg.get("type", "plateau")).lower()  # type: ignore[assignment]
+    if scheduler_kind not in ("plateau", "cosine"):
+        scheduler_kind = "plateau"
+
+    scheduler: ReduceLROnPlateau | CosineAnnealingLR | None
+    if scheduler_kind == "cosine":
+        scheduler = CosineAnnealingLR(
+            optimizer, T_max=max(epochs, 1), eta_min=float(sched_cfg.get("eta_min", 1e-6))
+        )
+    else:
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode=str(sched_cfg.get("mode", "min")),
+            factor=float(sched_cfg.get("factor", 0.5)),
+            patience=int(sched_cfg.get("patience", 5)),
+        )
+
     max_grad_norm = float(train_cfg.get("gradient_clip_norm", 1.0))
     use_amp = bool(train_cfg.get("amp", True)) and device.type == "cuda"
     scaler: GradScaler | None = (
         GradScaler("cuda", enabled=use_amp) if device.type == "cuda" else None
     )
 
-    save_dir = str(ckpt_cfg.get("save_dir", "checkpoints"))
-    os.makedirs(save_dir, exist_ok=True)
-    outputs_dir = str(out_cfg.get("dir", "outputs"))
-    os.makedirs(outputs_dir, exist_ok=True)
+    use_mixup = bool(mix_cfg.get("enabled", False))
+    mixup_alpha = float(mix_cfg.get("alpha", 0.2))
 
     periodic = int(ckpt_cfg.get("periodic_every_epochs", 10))
     resume_path = train_cfg.get("resume") or ckpt_cfg.get("resume")
@@ -148,8 +232,14 @@ def run_training(cfg: dict[str, Any]) -> None:
         checkpoint = load_checkpoint(rp, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        if "scheduler_state_dict" in checkpoint and checkpoint["scheduler_state_dict"] is not None:
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        ck_sched_kind = checkpoint.get("scheduler_kind", scheduler_kind)
+        if ck_sched_kind == scheduler_kind and "scheduler_state_dict" in checkpoint:
+            sd = checkpoint.get("scheduler_state_dict")
+            if sd is not None and scheduler is not None:
+                try:
+                    scheduler.load_state_dict(sd)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Could not load scheduler state: %s", exc)
         if scaler is not None and checkpoint.get("scaler_state_dict"):
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
@@ -165,9 +255,10 @@ def run_training(cfg: dict[str, Any]) -> None:
         mode=es_mode,
     )
 
-    metrics_path = Path(outputs_dir) / "metrics.json"
-    report_path = Path(outputs_dir) / "classification_report.json"
-    csv_path = Path(outputs_dir) / "training_history.csv"
+    metrics_path = outputs_dir / "metrics.json"
+    report_path = outputs_dir / "classification_report.json"
+    extended_metrics_path = outputs_dir / "extended_metrics.json"
+    csv_path = outputs_dir / "training_history.csv"
 
     for epoch in range(start_epoch, epochs):
         logger.info("Epoch %d / %d", epoch + 1, epochs)
@@ -180,12 +271,17 @@ def run_training(cfg: dict[str, Any]) -> None:
             scaler=scaler,
             use_amp=use_amp,
             max_grad_norm=max_grad_norm,
+            use_mixup=use_mixup,
+            mixup_alpha=mixup_alpha,
         )
-        val_loss, val_acc, report, cm = validate(
+        val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
             model, val_loader, criterion, device, class_names, use_amp=use_amp
         )
 
-        scheduler.step(val_loss)
+        if scheduler_kind == "plateau" and isinstance(scheduler, ReduceLROnPlateau):
+            scheduler.step(val_loss)
+        elif scheduler_kind == "cosine" and isinstance(scheduler, CosineAnnealingLR):
+            scheduler.step()
         current_lr = optimizer.param_groups[0]["lr"]
 
         history["train_loss"].append(train_loss)
@@ -200,32 +296,60 @@ def run_training(cfg: dict[str, Any]) -> None:
             "val_loss": val_loss,
             "val_acc": val_acc,
             "lr": current_lr,
+            "macro_f1": extended.get("macro_f1"),
+            "weighted_f1": extended.get("weighted_f1"),
+            "balanced_accuracy": extended.get("balanced_accuracy"),
+            "roc_auc_ovr": extended.get("roc_auc_ovr"),
         }
         history_rows.append(row)
         write_training_history_csv(csv_path, history_rows)
 
+        if exp_dir is not None:
+            append_metrics_jsonl(exp_dir, row)
+
         logger.info(
-            "Train loss=%.4f acc=%.4f | Val loss=%.4f acc=%.4f | lr=%.6f",
+            "Train loss=%.4f acc=%.4f | Val loss=%.4f acc=%.4f | lr=%.6f | macro_f1=%.4f",
             train_loss,
             train_acc,
             val_loss,
             val_acc,
             current_lr,
+            float(extended.get("macro_f1", 0.0)),
         )
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             ckpt = _build_checkpoint(
-                epoch, model, optimizer, scheduler, best_val_acc, history, class_names, scaler
+                epoch,
+                model,
+                optimizer,
+                scheduler,
+                best_val_acc,
+                history,
+                class_names,
+                scaler,
+                model_name=model_name,
+                scheduler_kind=scheduler_kind,
+                pretrained=pretrained,
             )
-            torch.save(ckpt, os.path.join(save_dir, "best_model.pth"))
+            torch.save(ckpt, save_dir / "best_model.pth")
             logger.info("Saved new best model (val_acc=%.4f)", val_acc)
 
         ckpt_full = _build_checkpoint(
-            epoch, model, optimizer, scheduler, best_val_acc, history, class_names, scaler
+            epoch,
+            model,
+            optimizer,
+            scheduler,
+            best_val_acc,
+            history,
+            class_names,
+            scaler,
+            model_name=model_name,
+            scheduler_kind=scheduler_kind,
+            pretrained=pretrained,
         )
         if periodic > 0 and (epoch + 1) % periodic == 0:
-            path = os.path.join(save_dir, f"checkpoint_epoch_{epoch + 1}.pth")
+            path = save_dir / f"checkpoint_epoch_{epoch + 1}.pth"
             torch.save(ckpt_full, path)
             logger.info("Periodic checkpoint: %s", path)
 
@@ -233,14 +357,14 @@ def run_training(cfg: dict[str, Any]) -> None:
         if early.step(float(stop_metric)):
             break
 
-    best_path = Path(save_dir) / "best_model.pth"
+    best_path = save_dir / "best_model.pth"
     if best_path.is_file():
         best = load_checkpoint(best_path, map_location=device)
         model.load_state_dict(best["model_state_dict"])
     else:
         logger.warning("No best_model.pth found; skipping reload for final eval.")
 
-    val_loss, val_acc, report, cm = validate(
+    val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
         model, val_loader, criterion, device, class_names, use_amp=use_amp
     )
     logger.info("Final validation accuracy: %.4f", val_acc)
@@ -254,13 +378,26 @@ def run_training(cfg: dict[str, Any]) -> None:
             "epochs_ran": len(history["train_loss"]),
             "seed": seed,
             "class_names": class_names,
+            "model_name": model_name,
+            "extended": extended,
         },
     )
     save_classification_report_json(report_path, report)
+    with extended_metrics_path.open("w", encoding="utf-8") as f:
+        json.dump(extended, f, indent=2)
+
+    roc_data = roc_curve_data(y_true, y_score, class_names)
+    with (outputs_dir / "roc_curve_data.json").open("w", encoding="utf-8") as f:
+        json.dump(roc_data, f, indent=2)
+    pr_data = precision_recall_curve_data(y_true, y_score, class_names)
+    with (outputs_dir / "pr_curve_data.json").open("w", encoding="utf-8") as f:
+        json.dump(pr_data, f, indent=2)
 
     if history["train_loss"]:
-        plot_training_history(history, Path(save_dir) / "training_history.png")
-        plot_confusion_matrix(cm, class_names, Path(save_dir) / "confusion_matrix.png")
+        plot_training_history(history, figures_dir / "training_history.png")
+        plot_confusion_matrix(cm, class_names, figures_dir / "confusion_matrix.png")
+        plot_roc_curves(roc_data, class_names, figures_dir / "roc_curves.png")
+        plot_pr_curves(pr_data, class_names, figures_dir / "pr_curves.png")
     else:
         logger.warning("No training epochs completed; skipping plot exports.")
 

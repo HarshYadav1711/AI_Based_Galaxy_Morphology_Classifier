@@ -63,7 +63,7 @@ def example_data_loading() -> None:
         print(f"\n{data_dir} missing; run download_sample_data first.")
         return
     try:
-        train_loader, val_loader, class_names = load_dataset(
+        train_loader, val_loader, class_names, _train_labels = load_dataset(
             data_dir=data_dir,
             image_size=224,
             batch_size=32,

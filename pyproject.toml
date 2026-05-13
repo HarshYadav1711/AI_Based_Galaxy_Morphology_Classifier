@@ -36,6 +36,7 @@ dev = [
 galaxy-train = "galaxy_morphology.training.cli:main"
 galaxy-infer = "galaxy_morphology.inference.cli:main"
 galaxy-sample-data = "galaxy_morphology.data.sample_download:main"
+galaxy-benchmark = "galaxy_morphology.evaluation.benchmark_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

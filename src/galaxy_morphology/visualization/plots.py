@@ -73,3 +73,83 @@ def plot_confusion_matrix(
     plt.savefig(p)
     plt.close(fig)
     logger.info("Saved confusion matrix: %s", p)
+
+
+def plot_class_distribution(
+    class_counts: dict[str, int],
+    save_path: str | Path,
+) -> None:
+    """Bar chart of image counts per class."""
+    names = list(class_counts.keys())
+    vals = [class_counts[n] for n in names]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(names, vals, color="steelblue")
+    ax.set_ylabel("Count")
+    ax.set_title("Training set class distribution")
+    ax.grid(axis="y", alpha=0.3)
+    plt.xticks(rotation=20, ha="right")
+    plt.tight_layout()
+    p = Path(save_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(p)
+    plt.close(fig)
+    logger.info("Saved class distribution: %s", p)
+
+
+def plot_roc_curves(
+    roc_data: dict[str, object],
+    class_names: list[str],
+    save_path: str | Path,
+) -> None:
+    """One-vs-rest ROC curves (uses JSON structure from :func:`roc_curve_data`)."""
+    curves = roc_data.get("curves", {})
+    if not curves:
+        logger.warning("No ROC data to plot; skipping.")
+        return
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for name in class_names:
+        if name not in curves:
+            continue
+        c = curves[name]
+        ax.plot(c["fpr"], c["tpr"], label=name)
+    ax.plot([0, 1], [0, 1], "k--", lw=0.8, alpha=0.5)
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
+    ax.set_title("ROC (one-vs-rest)")
+    ax.legend(loc="lower right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    p = Path(save_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(p)
+    plt.close(fig)
+    logger.info("Saved ROC curves: %s", p)
+
+
+def plot_pr_curves(
+    pr_data: dict[str, object],
+    class_names: list[str],
+    save_path: str | Path,
+) -> None:
+    """Per-class precision–recall curves."""
+    curves = pr_data.get("curves", {})
+    if not curves:
+        logger.warning("No PR data to plot; skipping.")
+        return
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for name in class_names:
+        if name not in curves:
+            continue
+        c = curves[name]
+        ax.plot(c["recall"], c["precision"], label=name)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title("Precision–recall (one-vs-rest)")
+    ax.legend(loc="lower left", fontsize=8)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    p = Path(save_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(p)
+    plt.close(fig)
+    logger.info("Saved PR curves: %s", p)

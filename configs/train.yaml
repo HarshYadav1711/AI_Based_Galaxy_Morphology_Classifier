@@ -2,7 +2,6 @@ seed: 42
 reproducibility:
   deterministic_cudnn: true
 
-# null = auto-select CUDA if available, else CPU
 device: null
 
 logging:
@@ -14,9 +13,12 @@ data:
   image_size: 224
   batch_size: 32
   num_workers: 0
+  quality:
+    enabled: true
 
 model:
   name: lightweight
+  pretrained: true
 
 training:
   epochs: 50
@@ -25,6 +27,12 @@ training:
   gradient_clip_norm: 1.0
   amp: true
   resume: null
+  loss:
+    weighted: false
+    label_smoothing: 0.0
+  mixup:
+    enabled: false
+    alpha: 0.2
   early_stopping:
     patience: 0
     min_delta: 0.0
@@ -34,9 +42,16 @@ training:
     periodic_every_epochs: 10
 
 scheduler:
+  type: plateau
   mode: min
   factor: 0.5
   patience: 5
+  eta_min: 1.0e-6
+
+experiment:
+  enabled: false
+  root: experiments
+  slug: null
 
 outputs:
   dir: outputs
