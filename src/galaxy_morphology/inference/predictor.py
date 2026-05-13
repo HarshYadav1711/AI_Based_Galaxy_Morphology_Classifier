@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from galaxy_morphology.models.registry import build_model
+from galaxy_morphology.utils.model_outputs import morph_logits
 from galaxy_morphology.utils.torch_io import load_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,8 @@ def load_model(
     class_names = list(ckpt.get("class_names", ["spiral", "elliptical", "irregular"]))
     num_classes = len(class_names)
     resolved_name = str(model_name or ckpt.get("model_name", "lightweight"))
+    if ckpt.get("multitask"):
+        resolved_name = "lightweight_multitask"
     # Weights are loaded from checkpoint; avoid re-downloading ImageNet backbones.
     model = build_model(resolved_name, num_classes, pretrained=False)
     model.load_state_dict(ckpt["model_state_dict"])
@@ -86,7 +89,8 @@ def predict(
     image_tensor = image_tensor.to(device)
     with torch.no_grad():
         outputs = model(image_tensor)
-        probabilities = F.softmax(outputs, dim=1)
+        logits = morph_logits(outputs)
+        probabilities = F.softmax(logits, dim=1)
         confidence, predicted = torch.max(probabilities, 1)
     predicted_class = class_names[int(predicted.item())]
     confidence_score = float(confidence.item())
@@ -145,7 +149,7 @@ def predict_paths_batched(
     with torch.no_grad():
         for batch_x, batch_paths in loader:
             batch_x = batch_x.to(device, non_blocking=True)
-            logits = model(batch_x)
+            logits = morph_logits(model(batch_x))
             probs = F.softmax(logits, dim=1)
             conf, pred = torch.max(probs, 1)
             for i in range(batch_x.size(0)):

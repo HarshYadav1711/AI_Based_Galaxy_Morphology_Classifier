@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
+from galaxy_morphology.explainability.cam_wrapper import MorphologyOnlyWrapper
 from galaxy_morphology.explainability.target_layers import gradcam_target_layers
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,13 @@ def explain_gradcam(
 
     model.eval()
     targets = [ClassifierOutputTarget(target_class_idx)]
-    layers = gradcam_target_layers(model, model_name)
-    cam = GradCAM(model=model, target_layers=layers)
+    if hasattr(model, "merger_head"):
+        cam_model = MorphologyOnlyWrapper(model)
+        layers = [model.conv4]
+    else:
+        cam_model = model
+        layers = gradcam_target_layers(model, model_name)
+    cam = GradCAM(model=cam_model, target_layers=layers)
 
     rgb = tensor_to_rgb_image(input_tensor[0])
     x = input_tensor.detach().clone().to(device)

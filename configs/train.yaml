@@ -15,8 +15,16 @@ data:
   num_workers: 0
   quality:
     enabled: true
+  augmentation:
+    rotation_degrees: 180   # train-time RandomRotation(±); set 15 for milder aug
 
-model:
+multitask:
+  enabled: false          # use model.name: lightweight_multitask to train heads
+  manifest_csv: null      # e.g. data/multitask_labels.csv — paths relative to data.dir
+  loss_weights:
+    merger: 0.5
+    bar: 0.5
+    asymmetry: 0.1
   name: lightweight
   pretrained: true
 

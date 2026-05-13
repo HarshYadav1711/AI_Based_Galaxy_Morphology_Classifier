@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "galaxy-morphology"
 version = "1.0.0"
-description = "Research-grade PyTorch galaxy morphology classifier (spiral / elliptical / irregular)."
+description = "AI-assisted galaxy morphology analysis: local PyTorch workflows, multi-task heads, robustness, and explainability."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -42,6 +42,9 @@ galaxy-infer = "galaxy_morphology.inference.cli:main"
 galaxy-sample-data = "galaxy_morphology.data.sample_download:main"
 galaxy-benchmark = "galaxy_morphology.evaluation.benchmark_cli:main"
 galaxy-trust-report = "galaxy_morphology.explainability.trust_report_cli:main"
+galaxy-scientific-eval = "galaxy_morphology.evaluation.scientific_cli:main"
+galaxy-dataset-study = "galaxy_morphology.analysis.dataset_study_cli:main"
+galaxy-al-export = "galaxy_morphology.active_learning.export_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

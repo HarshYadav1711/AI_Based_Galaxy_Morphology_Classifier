@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from galaxy_morphology.utils.model_outputs import morph_logits
+
 
 def _set_bn_eval_dropout_train(module: nn.Module) -> None:
     for m in module.modules():
@@ -28,7 +30,7 @@ def mc_dropout_stats(
     """
     if num_samples <= 0:
         with torch.inference_mode():
-            logits = model(x.to(device))
+            logits = morph_logits(model(x.to(device)))
             probs = F.softmax(logits, dim=1)
         conf, _ = probs.max(dim=1)
         return {
@@ -44,7 +46,7 @@ def mc_dropout_stats(
     probs_stack: list[torch.Tensor] = []
     with torch.inference_mode():
         for _ in range(num_samples):
-            logits = model(x.to(device))
+            logits = morph_logits(model(x.to(device)))
             probs_stack.append(F.softmax(logits, dim=1))
 
     model.train(was_training)

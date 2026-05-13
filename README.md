@@ -1,6 +1,6 @@
-# AI-Based Galaxy Morphology Classifier
+# AI-assisted galaxy morphology analysis system
 
-A **local-first**, reproducible PyTorch project for classifying galaxy images into **spiral**, **elliptical**, and **irregular** morphologies. The codebase is structured for research workflows (clear modules, YAML configs, exported metrics) while staying small enough to run on a laptop with no cloud services or API keys.
+**Local-first, reproducible PyTorch tooling** for **scalable astronomical workflows**: morphology classification, **optional multi-task** science heads (merger / bar / asymmetry proxies), **rotation-aware training**, **test-time augmentation**, **active-learning exports**, **robustness evaluation**, **dataset characterization**, and **explainability** (Grad-CAM, calibration, MC dropout) — all runnable **without cloud services or paid APIs**.
 
 For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 
@@ -9,18 +9,20 @@ For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 | Layer | Role |
 |--------|------|
 | **configs/** | Single source of truth for hyperparameters (`train.yaml`, `inference.yaml`). |
-| **src/galaxy_morphology/data/** | `Dataset`, loaders, **dataset quality** JSON, optional SDSS helpers, sample data script. |
-| **src/galaxy_morphology/models/** | Custom CNNs plus **torchvision** transfer models (EfficientNet-B0, ConvNeXt Tiny, ResNet50) via **registry** (`build_model` / `list_model_names`). |
-| **src/galaxy_morphology/training/** | AMP, grad clip, early stopping, **mixup**, **weighted CE**, **label smoothing**, **cosine or plateau** LR, local **experiment** dirs (JSONL + CSV). |
-| **src/galaxy_morphology/inference/** | Checkpoint load, batched inference, optional **ONNX** export, **throughput** benchmark. |
-| **src/galaxy_morphology/evaluation/** | Metrics, **macro/weighted F1**, balanced accuracy, ROC-AUC (OvR), **benchmark** → CSV + Markdown table. |
-| **src/galaxy_morphology/explainability/** | **Grad-CAM** (`grad-cam`), **MC dropout** uncertainty, **ECE** + reliability plots, failure montages, **trust report** CLI. |
+| **src/galaxy_morphology/data/** | `Dataset`, loaders, **multi-task manifest**, **dataset quality** JSON, optional SDSS helpers, sample data script. |
+| **src/galaxy_morphology/models/** | Custom CNNs (incl. **lightweight_multitask**), torchvision backbones via **registry**. |
+| **src/galaxy_morphology/training/** | AMP, grad clip, early stopping, **mixup** (single-task), **multi-task** loop, **weighted CE**, LR schedules, **experiment** dirs. |
+| **src/galaxy_morphology/inference/** | Checkpoints, batched inference, **TTA**, optional **ONNX**, throughput benchmark. |
+| **src/galaxy_morphology/evaluation/** | Metrics, ROC/PR, **benchmark** table, **scientific robustness** CLI (`galaxy-scientific-eval`). |
+| **src/galaxy_morphology/explainability/** | Grad-CAM, MC dropout, calibration, trust report. |
+| **src/galaxy_morphology/active_learning/** | JSONL **queue**, **human-review CSV** export, **manifest merge** helpers. |
+| **src/galaxy_morphology/analysis/** | **Dataset study** report (class balance, sharpness proxy, augmentation stats). |
 | **src/galaxy_morphology/visualization/** | Training curves, confusion matrix, **ROC**, **PR**, **class distribution**. |
 | **src/galaxy_morphology/utils/** | YAML merge, structured logging, seeds, checkpoint I/O. |
 | **tests/** | pytest smoke tests for model, data, inference, registry, and config loading. |
 | **app/** | **Streamlit** local demo (`streamlit_app.py`, `components/`, `assets/`). |
 
-Training flow: **YAML + CLI overrides** → **optional dataset quality JSON** → **deterministic seed / cuDNN** → **DataLoaders** → **forward + loss** (optional **AMP**, **grad clip**, **mixup**, **class weights**, **label smoothing**) → **validation + extended metrics** → **scheduler / early stopping** → **checkpoints** (store `model_name`, `scheduler_kind`, `pretrained`) → **ROC/PR + experiment JSONL**.
+Training flow: **YAML** → **loaders** (optional **rotation augmentation**, optional **multi-task** labels) → **forward + loss** → **validation + extended metrics** → **checkpoints** (`model_name`, `multitask` flag when applicable) → **ROC/PR / trust / robustness artifacts**.
 
 ## Setup
 
@@ -50,8 +52,21 @@ Console entry points (after `pip install -e .`):
 - `galaxy-sample-data` — dummy or SDSS sample images  
 - `galaxy-benchmark` — compare models (CSV + Markdown table)  
 - `galaxy-trust-report` — validation trust report (calibration, Grad-CAM, failures, markdown)  
+- `galaxy-scientific-eval` — rotation / noise / low-resolution robustness on the val split  
+- `galaxy-dataset-study` — markdown dataset characterization (`outputs/dataset_study/report.md`)  
+- `galaxy-al-export` — export low-confidence queue to a human-review CSV  
 
 Without installation, use `python scripts/train.py` (scripts prepend `src/` to `sys.path`).
+
+## Science extensions (local)
+
+- **Multi-task training:** set `model.name: lightweight_multitask` and optional `multitask.manifest_csv` (see `docs/example_multitask_manifest.csv`). Auxiliary losses are **masked** when labels are absent.
+- **Rotation augmentation:** `data.augmentation.rotation_degrees` in `configs/train.yaml` (train split only).
+- **TTA:** `galaxy_morphology.inference.tta.predict_with_rotation_tta` for averaged rotation predictions.
+- **Active learning:** append JSONL rows with `galaxy_morphology.active_learning.queue.append_records`, then `galaxy-al-export` for a review CSV; merge completed rows via `merge_review_to_manifest` in `active_learning/merge_manifest.py`.
+- **Robustness JSON:** `galaxy-scientific-eval --checkpoint checkpoints/best_model.pth`.
+- **Dataset study:** `galaxy-dataset-study` → `outputs/dataset_study/report.md`.
+- **Write-up template:** [docs/RESEARCH_REPORT.md](docs/RESEARCH_REPORT.md).
 
 ## Quick start
 

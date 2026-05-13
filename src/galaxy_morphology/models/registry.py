@@ -13,6 +13,7 @@ from galaxy_morphology.models.backbones import (
     build_resnet50,
 )
 from galaxy_morphology.models.cnn import EfficientGalaxyNet, LightweightGalaxyCNN
+from galaxy_morphology.models.multitask_cnn import LightweightMultiTaskGalaxyCNN
 
 # Registry: name -> builder(num_classes, pretrained, **kwargs)
 _ModelBuilder = Callable[..., nn.Module]
@@ -21,6 +22,11 @@ _ModelBuilder = Callable[..., nn.Module]
 def _build_lightweight(num_classes: int, pretrained: bool = False, **_: Any) -> nn.Module:
     _ = pretrained
     return LightweightGalaxyCNN(num_classes=num_classes)
+
+
+def _build_lightweight_multitask(num_classes: int, pretrained: bool = False, **_: Any) -> nn.Module:
+    _ = pretrained
+    return LightweightMultiTaskGalaxyCNN(num_classes=num_classes)
 
 
 def _build_efficient_galaxy(num_classes: int, pretrained: bool = False, **_: Any) -> nn.Module:
@@ -42,6 +48,7 @@ def _build_resnet50(num_classes: int, pretrained: bool = True, **_: Any) -> nn.M
 
 MODEL_REGISTRY: dict[str, _ModelBuilder] = {
     "lightweight": _build_lightweight,
+    "lightweight_multitask": _build_lightweight_multitask,
     "efficient": _build_efficient_galaxy,
     "efficientnet_b0": _build_efficientnet_b0,
     "convnext_tiny": _build_convnext_tiny,

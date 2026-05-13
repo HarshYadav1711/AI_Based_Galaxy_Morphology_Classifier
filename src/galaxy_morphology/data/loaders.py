@@ -12,6 +12,11 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from galaxy_morphology.data.dataset import GalaxyDataset
+from galaxy_morphology.data.multitask_dataset import GalaxyMultiTaskDataset
+from galaxy_morphology.data.multitask_manifest import (
+    load_multitask_manifest,
+    multitask_targets_for_paths,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,10 @@ def load_dataset(
     batch_size: int = 32,
     num_workers: int = 0,
     seed: int = 42,
+    *,
+    rotation_degrees: int = 15,
+    multitask_manifest_csv: str | None = None,
+    use_multitask_dataset: bool = False,
 ) -> tuple[DataLoader, DataLoader, list[str], list[int], list[str], list[str]]:
     """Load train/validation loaders from ``data_dir/<class>/*.jpg|png``.
 
@@ -50,6 +59,9 @@ def load_dataset(
         batch_size: Batch size for both loaders.
         num_workers: ``DataLoader`` workers (0 is robust on Windows).
         seed: Random seed for splits when stratification fails.
+        rotation_degrees: Max absolute rotation for train-time ``RandomRotation``.
+        multitask_manifest_csv: Optional CSV with auxiliary labels (see docs).
+        use_multitask_dataset: If True, loaders yield ``(img, morph, aux, mask)`` batches.
 
     Returns:
         Tuple of ``(train_loader, val_loader, class_names, train_labels, train_paths, val_paths)``.
@@ -117,7 +129,7 @@ def load_dataset(
         [
             transforms.Resize((image_size, image_size)),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(15),
+            transforms.RandomRotation(rotation_degrees),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -134,8 +146,22 @@ def load_dataset(
     gen = torch.Generator()
     gen.manual_seed(seed)
 
-    train_dataset = GalaxyDataset(train_paths, train_labels, transform=train_transform)
-    val_dataset = GalaxyDataset(val_paths, val_labels, transform=val_transform)
+    manifest: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    if multitask_manifest_csv:
+        manifest = load_multitask_manifest(multitask_manifest_csv, data_dir)
+    train_aux, train_m = multitask_targets_for_paths(train_paths, manifest)
+    val_aux, val_m = multitask_targets_for_paths(val_paths, manifest)
+
+    if use_multitask_dataset:
+        train_dataset = GalaxyMultiTaskDataset(
+            train_paths, train_labels, train_aux, train_m, transform=train_transform
+        )
+        val_dataset = GalaxyMultiTaskDataset(
+            val_paths, val_labels, val_aux, val_m, transform=val_transform
+        )
+    else:
+        train_dataset = GalaxyDataset(train_paths, train_labels, transform=train_transform)
+        val_dataset = GalaxyDataset(val_paths, val_labels, transform=val_transform)
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,

@@ -9,7 +9,7 @@ def gradcam_target_layers(model: nn.Module, model_name: str) -> list[nn.Module]:
     """Return one or more modules suitable for ``pytorch_grad_cam.GradCAM``."""
     key = (model_name or "lightweight").lower().strip()
 
-    if key == "lightweight":
+    if key in ("lightweight", "lightweight_multitask"):
         return [model.conv4]
 
     if key == "efficient":

@@ -29,7 +29,8 @@ class LightweightGalaxyCNN(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(128, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Embedding before the final morphology classifier (shape ``(N, 128)``)."""
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
         x = self.pool(F.relu(self.bn3(self.conv3(x))))
@@ -38,7 +39,10 @@ class LightweightGalaxyCNN(nn.Module):
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
-        return self.fc2(x)
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.forward_features(x))
 
 
 class EfficientGalaxyNet(nn.Module):

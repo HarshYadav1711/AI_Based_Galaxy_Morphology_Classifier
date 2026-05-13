@@ -30,6 +30,7 @@ from galaxy_morphology.models.registry import build_model, count_parameters
 from galaxy_morphology.training.early_stopping import EarlyStopping
 from galaxy_morphology.training.experiment import append_metrics_jsonl, create_experiment_dir
 from galaxy_morphology.training.loops import train_epoch, validate
+from galaxy_morphology.training.mt_loops import train_epoch_multitask, validate_multitask
 from galaxy_morphology.utils.seed import set_seed
 from galaxy_morphology.utils.torch_io import load_checkpoint
 from galaxy_morphology.visualization.plots import (
@@ -69,6 +70,7 @@ def _build_checkpoint(
     model_name: str,
     scheduler_kind: SchedulerKind,
     pretrained: bool,
+    multitask: bool = False,
 ) -> dict[str, Any]:
     ckpt: dict[str, Any] = {
         "epoch": epoch,
@@ -80,6 +82,7 @@ def _build_checkpoint(
         "model_name": model_name,
         "scheduler_kind": scheduler_kind,
         "pretrained": pretrained,
+        "multitask": bool(multitask),
     }
     if scheduler is not None:
         ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -115,12 +118,20 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
     loss_cfg = train_cfg.get("loss", {}) or {}
     mix_cfg = train_cfg.get("mixup", {}) or {}
     exp_cfg = cfg.get("experiment", {}) or {}
+    mt_cfg = cfg.get("multitask", {}) or {}
+    aug_cfg = data_cfg.get("augmentation", {}) or {}
 
     data_dir = str(data_cfg.get("dir", "data/galaxies"))
     train_split = float(data_cfg.get("train_split", 0.8))
     image_size = int(data_cfg.get("image_size", 224))
     batch_size = int(data_cfg.get("batch_size", 32))
     num_workers = int(data_cfg.get("num_workers", 0))
+
+    model_name = str(model_cfg.get("name", "lightweight"))
+    use_mt = model_name == "lightweight_multitask"
+    rotation_degrees = int(aug_cfg.get("rotation_degrees", 15))
+    mcsv = mt_cfg.get("manifest_csv")
+    multitask_manifest: str | None = str(Path(mcsv)) if mcsv else None
 
     device = _device_from_config(cfg)
     logger.info("Using device: %s", device)
@@ -159,6 +170,9 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
         batch_size=batch_size,
         num_workers=num_workers,
         seed=seed,
+        rotation_degrees=rotation_degrees,
+        multitask_manifest_csv=multitask_manifest,
+        use_multitask_dataset=use_mt,
     )
     label_counts = Counter(train_labels)
     train_class_counts = {
@@ -166,7 +180,6 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
     }
     plot_class_distribution(train_class_counts, figures_dir / "class_distribution_train.png")
 
-    model_name = str(model_cfg.get("name", "lightweight"))
     pretrained = bool(model_cfg.get("pretrained", True))
     model = build_model(model_name, len(class_names), pretrained=pretrained)
     logger.info("Model: %s | parameters: %s", model_name, f"{count_parameters(model):,}")
@@ -181,6 +194,10 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
         weight=weight_tensor,
         label_smoothing=label_smoothing,
     )
+    lw = mt_cfg.get("loss_weights", {}) or {}
+    w_merger = float(lw.get("merger", 0.5))
+    w_bar = float(lw.get("bar", 0.5))
+    w_asym = float(lw.get("asymmetry", 0.1))
 
     lr = float(train_cfg.get("lr", 1e-3))
     weight_decay = float(train_cfg.get("weight_decay", 1e-4))
@@ -210,7 +227,9 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
         GradScaler("cuda", enabled=use_amp) if device.type == "cuda" else None
     )
 
-    use_mixup = bool(mix_cfg.get("enabled", False))
+    use_mixup = bool(mix_cfg.get("enabled", False)) and not use_mt
+    if use_mt and bool(mix_cfg.get("enabled", False)):
+        logger.warning("Mixup is disabled for multi-task training.")
     mixup_alpha = float(mix_cfg.get("alpha", 0.2))
 
     periodic = int(ckpt_cfg.get("periodic_every_epochs", 10))
@@ -262,21 +281,47 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
 
     for epoch in range(start_epoch, epochs):
         logger.info("Epoch %d / %d", epoch + 1, epochs)
-        train_loss, train_acc = train_epoch(
-            model,
-            train_loader,
-            criterion,
-            optimizer,
-            device,
-            scaler=scaler,
-            use_amp=use_amp,
-            max_grad_norm=max_grad_norm,
-            use_mixup=use_mixup,
-            mixup_alpha=mixup_alpha,
-        )
-        val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
-            model, val_loader, criterion, device, class_names, use_amp=use_amp
-        )
+        if use_mt:
+            train_loss, train_acc = train_epoch_multitask(
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+                device,
+                scaler=scaler,
+                use_amp=use_amp,
+                max_grad_norm=max_grad_norm,
+                w_merger=w_merger,
+                w_bar=w_bar,
+                w_asym=w_asym,
+            )
+            val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate_multitask(
+                model,
+                val_loader,
+                criterion,
+                device,
+                class_names,
+                use_amp=use_amp,
+                w_merger=w_merger,
+                w_bar=w_bar,
+                w_asym=w_asym,
+            )
+        else:
+            train_loss, train_acc = train_epoch(
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+                device,
+                scaler=scaler,
+                use_amp=use_amp,
+                max_grad_norm=max_grad_norm,
+                use_mixup=use_mixup,
+                mixup_alpha=mixup_alpha,
+            )
+            val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
+                model, val_loader, criterion, device, class_names, use_amp=use_amp
+            )
 
         if scheduler_kind == "plateau" and isinstance(scheduler, ReduceLROnPlateau):
             scheduler.step(val_loss)
@@ -331,6 +376,7 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
                 model_name=model_name,
                 scheduler_kind=scheduler_kind,
                 pretrained=pretrained,
+                multitask=use_mt,
             )
             torch.save(ckpt, save_dir / "best_model.pth")
             logger.info("Saved new best model (val_acc=%.4f)", val_acc)
@@ -347,6 +393,7 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
             model_name=model_name,
             scheduler_kind=scheduler_kind,
             pretrained=pretrained,
+            multitask=use_mt,
         )
         if periodic > 0 and (epoch + 1) % periodic == 0:
             path = save_dir / f"checkpoint_epoch_{epoch + 1}.pth"
@@ -364,9 +411,22 @@ def run_training(cfg: dict[str, Any], *, config_path: Path | None = None) -> Non
     else:
         logger.warning("No best_model.pth found; skipping reload for final eval.")
 
-    val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
-        model, val_loader, criterion, device, class_names, use_amp=use_amp
-    )
+    if use_mt:
+        val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate_multitask(
+            model,
+            val_loader,
+            criterion,
+            device,
+            class_names,
+            use_amp=use_amp,
+            w_merger=w_merger,
+            w_bar=w_bar,
+            w_asym=w_asym,
+        )
+    else:
+        val_loss, val_acc, report, cm, extended, y_true, y_pred, y_score = validate(
+            model, val_loader, criterion, device, class_names, use_amp=use_amp
+        )
     logger.info("Final validation accuracy: %.4f", val_acc)
 
     save_metrics_json(
