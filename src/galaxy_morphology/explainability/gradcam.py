@@ -65,9 +65,7 @@ def explain_gradcam(
         if hasattr(cam, "release"):
             cam.release()
 
-    cam_map = (
-        np.asarray(grayscale[0]) if isinstance(grayscale, list) else np.asarray(grayscale)
-    )
+    cam_map = np.asarray(grayscale[0]) if isinstance(grayscale, list) else np.asarray(grayscale)
     if cam_map.ndim == 3:
         cam_map = cam_map[0]
     cam_map = np.squeeze(cam_map)

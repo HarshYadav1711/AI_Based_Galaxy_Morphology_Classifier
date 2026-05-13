@@ -1,0 +1,3 @@
+# Local Streamlit demo (optional)
+-r base.txt
+streamlit>=1.28.0

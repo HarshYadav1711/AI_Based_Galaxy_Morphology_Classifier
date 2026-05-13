@@ -18,6 +18,7 @@ For a minimal command sequence, see **[QUICKSTART.md](QUICKSTART.md)**.
 | **src/galaxy_morphology/visualization/** | Training curves, confusion matrix, **ROC**, **PR**, **class distribution**. |
 | **src/galaxy_morphology/utils/** | YAML merge, structured logging, seeds, checkpoint I/O. |
 | **tests/** | pytest smoke tests for model, data, inference, registry, and config loading. |
+| **app/** | **Streamlit** local demo (`streamlit_app.py`, `components/`, `assets/`). |
 
 Training flow: **YAML + CLI overrides** → **optional dataset quality JSON** → **deterministic seed / cuDNN** → **DataLoaders** → **forward + loss** (optional **AMP**, **grad clip**, **mixup**, **class weights**, **label smoothing**) → **validation + extended metrics** → **scheduler / early stopping** → **checkpoints** (store `model_name`, `scheduler_kind`, `pretrained`) → **ROC/PR + experiment JSONL**.
 
@@ -164,6 +165,41 @@ galaxy-infer --checkpoint checkpoints/best_model.pth --image path/to/galaxy.jpg 
 
 Writes overlay + comparison PNGs under `--explain-out`, prints **top-3** probabilities, **Monte Carlo dropout** summary (mean confidence, normalized entropy uncertainty, `needs_human_review` flag), and Grad-CAM paths.
 
+## Streamlit demo (local UI)
+
+A minimal **Streamlit** app lives under **`app/`**: single-image upload with **top-3** and **Grad-CAM**, **MC dropout** uncertainty with a confidence bar and **human-review** notice, plus **batch** inference from a **ZIP** or multi-file upload with **CSV** download. The model is loaded once per session via **`st.cache_resource`**; identical single-image runs are memoized in **session state**. Default sidebar option **Force CPU** keeps execution laptop-friendly.
+
+**Install demo dependency (Streamlit only):**
+
+```bash
+pip install -e ".[demo]"
+# or: pip install -r requirements/demo.txt && pip install -e .
+```
+
+**Run (from repository root):**
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+Theme and layout are tuned in **`.streamlit/config.toml`** and **`app/components/theme.py`** (dark “night sky” palette, no extra frontend stack).
+
+### Demo screenshots (placeholders)
+
+| Single-image + explainability | Batch + CSV |
+|-------------------------------|---------------|
+| ![Single tab placeholder](app/assets/screenshots/single-tab-placeholder.svg) | ![Batch tab placeholder](app/assets/screenshots/batch-tab-placeholder.svg) |
+
+Commit your own PNG/SVG captures over these placeholders under **`app/assets/screenshots/`** for documentation.
+
+### GIF walkthrough
+
+Record a short screen capture while you walk through **sidebar checkpoint → single image → Analyze → Batch tab → CSV download**, then save it as **`app/assets/walkthrough.gif`** and link it here:
+
+```markdown
+![Demo walkthrough](app/assets/walkthrough.gif)
+```
+
 ## Trustworthy AI (validation report)
 
 Automated **markdown report** plus figures under **`outputs/visualizations/`** (calibration, confusion matrix, failure montages, example Grad-CAMs):
@@ -175,6 +211,8 @@ galaxy-trust-report --checkpoint checkpoints/best_model.pth --data-dir data/gala
 This computes **validation accuracy / macro F1**, **expected calibration error (ECE)** on top-class confidence, a **reliability diagram**, a **confusion matrix** image, three **failure-analysis** montages (most confident wrong, least confident correct, lowest-confidence samples), **MC-dropout aggregate stats** on the first `--mc-subset` validation images (default 48), and **Grad-CAM** panels for the first `--gradcam-examples` images (default 4). Open **`outputs/visualizations/evaluation_report.md`** in any Markdown viewer; figures are linked with relative paths.
 
 **Grad-CAM / explanation screenshots for documentation:** run the commands above on your checkpoint, then add the generated PNGs (for example `outputs/visualizations/gradcam/*_gradcam_compare.png`) to your paper, slides, or commit copies under `docs/figures/` if you want them to render in Git-hosted README previews.
+
+## Metrics and artifacts
 
 After training you typically get:
 
@@ -206,6 +244,7 @@ Some GPU kernels remain non-deterministic even with these flags; for strict bitw
 
 ```text
 configs/                 # YAML configs
+app/                     # Streamlit demo (streamlit_app.py, components/, assets/)
 src/galaxy_morphology/   # Installable Python package
   data/ models/ training/ inference/ evaluation/ explainability/ visualization/ utils/
 scripts/                 # Runnable wrappers without prior pip install
@@ -214,7 +253,7 @@ notebooks/               # Optional experiments (.gitkeep)
 outputs/                 # metrics, plots (no experiment), CSV (.gitkeep)
 checkpoints/             # saved weights (.gitkeep)
 experiments/             # local experiment dirs when enabled (.gitkeep)
-requirements/            # base.txt + dev.txt
+requirements/            # base.txt, dev.txt, demo.txt
 pyproject.toml           # packaging, black/ruff/pytest settings
 setup.cfg                # setuptools metadata
 README.md
@@ -226,8 +265,8 @@ LICENSE                  # MIT
 ```bash
 pip install -r requirements/dev.txt
 pytest
-ruff check src tests scripts
-black src tests scripts
+ruff check src tests scripts app
+black src tests scripts app
 ```
 
 ## Data sources (external, public)
