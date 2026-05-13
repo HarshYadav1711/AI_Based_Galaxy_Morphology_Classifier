@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "galaxy-morphology"
+version = "1.0.0"
+description = "Research-grade PyTorch galaxy morphology classifier (spiral / elliptical / irregular)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Galaxy Morphology Classifier contributors" }]
+dependencies = [
+  "torch>=2.0.0",
+  "torchvision>=0.15.0",
+  "numpy>=1.24.0",
+  "pillow>=9.5.0",
+  "matplotlib>=3.7.0",
+  "scikit-learn>=1.3.0",
+  "astropy>=5.3.0",
+  "requests>=2.31.0",
+  "tqdm>=4.65.0",
+  "pandas>=2.0.0",
+  "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.4.0",
+  "black>=24.0.0",
+  "pre-commit>=3.7.0",
+]
+
+[project.scripts]
+galaxy-train = "galaxy_morphology.training.cli:main"
+galaxy-infer = "galaxy_morphology.inference.cli:main"
+galaxy-sample-data = "galaxy_morphology.data.sample_download:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
+"train.py" = ["E402"]
+"inference.py" = ["E402"]
+"download_sample_data.py" = ["E402"]
+"example_usage.py" = ["E402"]
+"model.py" = ["E402"]
+"data_loader.py" = ["E402"]

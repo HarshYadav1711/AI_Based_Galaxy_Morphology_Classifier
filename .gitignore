@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -23,21 +24,28 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyTorch
+# Tools
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# PyTorch checkpoints (keep directory via .gitkeep)
+checkpoints/*.pth
 *.pth
 *.pt
-checkpoints/
 
-# Data
-data/
-*.jpg
-*.jpeg
-*.png
-*.fits
-*.csv
+# Local data (user images)
+data/galaxies/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Run outputs (metrics/logs)
+outputs/*
+!outputs/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
 
 # IDE
 .vscode/
@@ -52,6 +60,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Legacy local plot dumps at repo root (plots now default under checkpoints/)
 training_history.png
 confusion_matrix.png
-

@@ -1,0 +1,11 @@
+checkpoint: checkpoints/best_model.pth
+model: lightweight
+image_size: 224
+
+# Set one of image / image_dir for a run, or pass CLI flags.
+image: null
+image_dir: null
+output_csv: null
+
+logging:
+  level: INFO

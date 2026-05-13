@@ -1,11 +1,13 @@
-"""Backward-compatible sample-data script (see ``scripts/download_sample_data.py``)."""
+#!/usr/bin/env python3
+"""Sample data launcher (adds ``src`` to ``sys.path``)."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parent / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 

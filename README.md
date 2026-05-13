@@ -1,242 +1,156 @@
 # AI-Based Galaxy Morphology Classifier
 
-A lightweight deep learning model for classifying galaxy morphologies into three categories: **Spiral**, **Elliptical**, and **Irregular**. This project uses PyTorch and is designed to work with public datasets from SDSS (Sloan Digital Sky Survey) and Galaxy Zoo.
+A **local-first**, reproducible PyTorch project for classifying galaxy images into **spiral**, **elliptical**, and **irregular** morphologies. The codebase is structured for research workflows (clear modules, YAML configs, exported metrics) while staying small enough to run on a laptop with no cloud services or API keys.
 
-## 🚀 Quick Start
+## Architecture overview
 
-**1. Install dependencies:**
+| Layer | Role |
+|--------|------|
+| **configs/** | Single source of truth for hyperparameters (`train.yaml`, `inference.yaml`). |
+| **src/galaxy_morphology/data/** | `Dataset`, directory-based loaders, optional SDSS helpers, sample data script. |
+| **src/galaxy_morphology/models/** | `LightweightGalaxyCNN` and `EfficientGalaxyNet` (depthwise separable). |
+| **src/galaxy_morphology/training/** | Training loop with AMP (CUDA), gradient clipping, early stopping, checkpointing, CLI. |
+| **src/galaxy_morphology/inference/** | Checkpoint load (`map_location`), preprocessing, single/batch prediction, CLI. |
+| **src/galaxy_morphology/evaluation/** | Writes `metrics.json`, `classification_report.json`, `training_history.csv`. |
+| **src/galaxy_morphology/visualization/** | Training curves and confusion matrix PNGs. |
+| **src/galaxy_morphology/utils/** | YAML config merge, structured logging (tqdm-safe), seeds, checkpoint I/O. |
+| **tests/** | pytest smoke tests for model, data, inference, and config loading. |
+
+Training flow: **YAML + CLI overrides** → **deterministic seed / cuDNN flags** → **DataLoaders** → **forward + loss** (optional **AMP** + **grad clip**) → **validation** → **scheduler / early stopping** → **periodic and best checkpoints** → **metrics + plots**.
+
+## Setup
+
+**Python 3.10+** recommended.
+
 ```bash
-pip install -r requirements.txt
+# Virtual environment (recommended)
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Linux / macOS
+
+# Runtime dependencies
+pip install -r requirements/base.txt
+
+# Editable install (adds console commands + stable imports)
+pip install -e .
+
+# Optional: developer tools
+pip install -r requirements/dev.txt
+pre-commit install
 ```
 
-**2. Create test data (optional, for quick testing):**
+Console entry points (after `pip install -e .`):
+
+- `galaxy-train` — training CLI  
+- `galaxy-infer` — inference CLI  
+- `galaxy-sample-data` — dummy or SDSS sample images  
+
+Without installation, use `python scripts/train.py` (scripts prepend `src/` to `sys.path`).
+
+## Quick start
+
 ```bash
-python download_sample_data.py --mode dummy --num_per_class 5
+python scripts/download_sample_data.py --mode dummy --num-per-class 5
+python scripts/train.py --config configs/train.yaml --epochs 3
+python scripts/inference.py --checkpoint checkpoints/best_model.pth --image data/galaxies/spiral/spiral_1.png
 ```
 
-**3. Train the model:**
+## Training
+
+1. Put images under `data/galaxies/<class>/` with classes `spiral`, `elliptical`, `irregular` (see `configs/train.yaml` → `data.dir`).
+2. Edit hyperparameters in **`configs/train.yaml`** (epochs, LR, AMP, early stopping, checkpoint cadence, etc.).
+3. Run:
+
 ```bash
-python train.py --data_dir data/galaxies
+galaxy-train --config configs/train.yaml
+# or
+python train.py --config configs/train.yaml
 ```
 
-**4. Make predictions:**
+**CLI overrides** (optional) merge into the YAML tree, for example:
+
 ```bash
-python inference.py --checkpoint checkpoints/best_model.pth --image your_image.jpg
+python scripts/train.py --config configs/train.yaml --data-dir data/galaxies --epochs 20 --batch-size 16 --lr 0.0005 --model efficient
 ```
 
-📖 **For detailed step-by-step instructions, see [QUICKSTART.md](QUICKSTART.md)**
+**Resume** from a checkpoint:
 
-## Features
-
-- **Lightweight CNN Architecture**: Two model options - a custom lightweight CNN and an efficient MobileNet-inspired architecture
-- **Data Augmentation**: Built-in augmentation for better generalization
-- **Easy to Use**: Simple command-line interface for training and inference
-- **Citizen Science Support**: Designed to assist in galaxy classification workflows
-
-## Project Structure
-
-```
-.
-├── data_loader.py          # Dataset loading and preprocessing
-├── model.py                # CNN model architectures
-├── train.py                # Training script
-├── inference.py            # Inference script for predictions
-├── download_sample_data.py # Script to download sample data
-├── requirements.txt        # Python dependencies
-└── README.md              # This file
-```
-
-## Installation
-
-1. **Clone or download this repository**
-
-2. **Install dependencies**:
 ```bash
-pip install -r requirements.txt
+python scripts/train.py --config configs/train.yaml --resume checkpoints/checkpoint_epoch_10.pth
 ```
 
-3. **Optional: Install astroquery for SDSS data access**:
+Training uses:
+
+- **Mixed precision** (`torch.amp`) when CUDA is available (toggle `training.amp` in YAML).
+- **Gradient clipping** (`training.gradient_clip_norm`).
+- **Early stopping** on `val_loss` or `val_acc` (`training.early_stopping`); set `patience: 0` to disable.
+- **Periodic checkpoints** that always serialize the **current** full state (fixes a bug where an old dict could be saved).
+- **`torch.load(..., map_location=device)`** (via `galaxy_morphology.utils.torch_io.load_checkpoint`) for resume and final evaluation.
+
+## Inference
+
+Edit **`configs/inference.yaml`** or pass flags:
+
 ```bash
-pip install astroquery
+galaxy-infer --checkpoint checkpoints/best_model.pth --image path/to/galaxy.jpg
+galaxy-infer --checkpoint checkpoints/best_model.pth --image-dir path/to/folder/ --output predictions.csv
 ```
 
-## Dataset Setup
+The checkpoint’s `class_names` are restored so labels stay consistent with training.
 
-### Option 1: Galaxy Zoo Dataset (Recommended)
+## Metrics and artifacts
 
-1. Visit [Galaxy Zoo Data Portal](https://data.galaxyzoo.org/)
-2. Download the galaxy images and classifications
-3. Organize images into the following structure:
+After training you typically get:
+
+| Artifact | Location |
+|----------|-----------|
+| Best weights | `checkpoints/best_model.pth` (and periodic `checkpoint_epoch_*.pth`) |
+| Training / validation curves | `checkpoints/training_history.png` |
+| Confusion matrix | `checkpoints/confusion_matrix.png` |
+| Run-level metrics | `outputs/metrics.json` |
+| Per-class sklearn report | `outputs/classification_report.json` |
+| Per-epoch CSV | `outputs/training_history.csv` |
+
+## Reproducibility
+
+- Global seed: `seed` in `configs/train.yaml`.
+- `galaxy_morphology.utils.seed.set_seed` sets Python, NumPy, and PyTorch seeds; optional **deterministic cuDNN** (`reproducibility.deterministic_cudnn`).
+- Stratified split uses `random_state=seed`; `DataLoader` shuffling uses a fixed `torch.Generator` when possible.
+
+Some GPU kernels remain non-deterministic even with these flags; for strict bitwise reproducibility prefer CPU or consult PyTorch deterministic ops notes.
+
+## Project structure
+
+```text
+configs/                 # YAML configs
+src/galaxy_morphology/   # Installable Python package
+  data/ models/ training/ inference/ evaluation/ visualization/ utils/
+scripts/                 # Runnable wrappers without prior pip install
+tests/                   # pytest
+notebooks/               # Optional experiments (.gitkeep)
+outputs/                 # metrics.json, CSV, etc. (.gitkeep)
+checkpoints/             # saved weights and plots (.gitkeep)
+requirements/            # base.txt + dev.txt
+pyproject.toml           # packaging, black/ruff/pytest settings
+setup.cfg                # setuptools metadata
+README.md
+LICENSE                  # MIT
 ```
-data/galaxies/
-    spiral/
-        img1.jpg
-        img2.jpg
-        ...
-    elliptical/
-        img1.jpg
-        img2.jpg
-        ...
-    irregular/
-        img1.jpg
-        img2.jpg
-        ...
-```
 
-### Option 2: SDSS API
+## Development
 
-You can use the SDSS API to download images programmatically. See `download_sample_data.py` for example code.
-
-### Option 3: Create Dummy Dataset (For Testing)
-
-To test the code structure without real data:
 ```bash
-python download_sample_data.py --mode dummy --num_per_class 5
+pip install -r requirements/dev.txt
+pytest
+ruff check src tests scripts
+black src tests scripts
 ```
 
-## Usage
+## Data sources (external, public)
 
-### Training
-
-Train the model with default settings:
-```bash
-python train.py --data_dir data/galaxies
-```
-
-With custom parameters:
-```bash
-python train.py \
-    --data_dir data/galaxies \
-    --model lightweight \
-    --epochs 50 \
-    --batch_size 32 \
-    --lr 0.001 \
-    --image_size 224 \
-    --save_dir checkpoints
-```
-
-**Parameters:**
-- `--data_dir`: Directory containing galaxy images (default: `data/galaxies`)
-- `--model`: Model architecture - `lightweight` or `efficient` (default: `lightweight`)
-- `--epochs`: Number of training epochs (default: 50)
-- `--batch_size`: Batch size (default: 32)
-- `--lr`: Learning rate (default: 0.001)
-- `--image_size`: Input image size (default: 224)
-- `--save_dir`: Directory to save checkpoints (default: `checkpoints`)
-- `--resume`: Path to checkpoint to resume training from
-
-### Inference
-
-**Single Image Prediction:**
-```bash
-python inference.py \
-    --checkpoint checkpoints/best_model.pth \
-    --image path/to/galaxy_image.jpg
-```
-
-**Batch Prediction:**
-```bash
-python inference.py \
-    --checkpoint checkpoints/best_model.pth \
-    --image_dir path/to/galaxy_images/ \
-    --output predictions.csv
-```
-
-**Parameters:**
-- `--checkpoint`: Path to trained model checkpoint (required)
-- `--image`: Path to single image for prediction
-- `--image_dir`: Directory containing images for batch prediction
-- `--model`: Model architecture used (default: `lightweight`)
-- `--output`: CSV file to save batch predictions
-
-## Model Architectures
-
-### LightweightGalaxyCNN
-A custom CNN with 4 convolutional blocks, batch normalization, and global average pooling. Designed for good accuracy with moderate computational requirements.
-
-### EfficientGalaxyNet
-A MobileNet-inspired architecture using depthwise separable convolutions. More efficient with fewer parameters, suitable for resource-constrained environments.
-
-## Training Outputs
-
-After training, you'll find:
-- `checkpoints/best_model.pth`: Best model checkpoint
-- `checkpoints/training_history.png`: Training curves
-- `checkpoints/confusion_matrix.png`: Confusion matrix
-
-## Example Workflow
-
-1. **Prepare your dataset**:
-```bash
-# Create directory structure
-mkdir -p data/galaxies/{spiral,elliptical,irregular}
-
-# Add your galaxy images to respective folders
-# Or use download_sample_data.py for testing
-```
-
-2. **Train the model**:
-```bash
-python train.py --data_dir data/galaxies --epochs 50
-```
-
-3. **Make predictions**:
-```bash
-python inference.py \
-    --checkpoint checkpoints/best_model.pth \
-    --image_dir test_galaxies/ \
-    --output results.csv
-```
-
-## Data Sources
-
-- **Galaxy Zoo**: [https://data.galaxyzoo.org/](https://data.galaxyzoo.org/)
-- **SDSS**: [https://www.sdss.org/](https://www.sdss.org/)
-- **Zoobot**: Pre-trained galaxy classification models - [https://github.com/mwalmsley/zoobot](https://github.com/mwalmsley/zoobot)
-
-## References
-
-- Galaxy Zoo: Citizen science project for galaxy classification
-- SDSS: Sloan Digital Sky Survey - comprehensive imaging and spectroscopic survey
-- Zoobot: Open-source galaxy morphology classification tools
-
-## Performance Tips
-
-1. **Data Quality**: Ensure good quality, properly labeled images
-2. **Data Augmentation**: The training script includes augmentation - adjust if needed
-3. **Model Selection**: Use `efficient` model for faster inference, `lightweight` for better accuracy
-4. **Batch Size**: Adjust based on your GPU memory
-5. **Learning Rate**: The script uses learning rate scheduling - monitor training curves
-
-## Troubleshooting
-
-**No images found error:**
-- Ensure images are in the correct subdirectories (spiral/, elliptical/, irregular/)
-- Check image file extensions (.jpg, .png, .jpeg)
-
-**CUDA out of memory:**
-- Reduce batch size: `--batch_size 16`
-- Use smaller image size: `--image_size 128`
-- Use the `efficient` model which has fewer parameters
-
-**Poor accuracy:**
-- Ensure you have enough training data (recommended: 100+ images per class)
-- Check data quality and labeling
-- Try training for more epochs
-- Adjust learning rate
+- [Galaxy Zoo](https://data.galaxyzoo.org/)  
+- [SDSS](https://www.sdss.org/)  
 
 ## License
 
-This project is provided as-is for educational and research purposes.
-
-## Contributing
-
-This is a lightweight implementation designed for citizen science workflows. Feel free to adapt and improve for your specific use case!
-
-## Citation
-
-If you use this code in your research, please consider citing:
-- Galaxy Zoo dataset
-- SDSS data
-- Relevant papers on galaxy morphology classification
-
+MIT — see [LICENSE](LICENSE).
